@@ -72,6 +72,16 @@ for (i in 1:nrow(mydata))
   {mydata[i,"child_schooling"] <- mydata$schooling[i]}
   else {mydata[i, "child_schooling"] <- NA}}
 
+# In order to make my data regression-friendly, I re-format my data set by household units. 
+# Each row contains the child's schooling and his/her mother and father's schooling along with all control variables.
+# I group all household into three categories: one-child, two-children, household-head-living-with-parents.
+# If there is one child in the household, his/her parents are matched by household code.
+# If there are two children in the household, each child enters in a separate row and their parent's schooling enters twice in the two rows.
+# If the household structure is household-head-living-with-parents, comprising "self" and "parent" (as specified in the "relationship" column), then "self" enters as the child and "parent" enters as the mother or father depending on their gender. 
+
+
+
+
 
 
 
