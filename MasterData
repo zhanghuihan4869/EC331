@@ -28,3 +28,10 @@ mydata <- rename(mydata, c("PCODE"="HHID","CODE_P"="INDID","P103"="relationship"
 
 # I'm going to restrict my data to age >= 22, so that most of them have completed university education
 mydata <- mydata[mydata$age >= 22,]
+
+# recode categorical variables to numeric factors
+mydata$female <- ifelse(mydata$female == "male", 0, ifelse(mydata$female == "female", 1, NA))
+#mydata$hukou <- ifelse(mydata$hukou == "Urban Hukou of the resident city (county)", 0, ifelse(mydata$hukou == "Rural Hukou of other city (or county)", 1, NA))
+mydata$minority <- as.numeric(mydata$minority == 2)
+
+
