@@ -1,4 +1,4 @@
-###Output my data set###
+###Output my data set from raw data###
 #Huihan Zhang
 
 # Load and install packages, note the new packages
@@ -24,15 +24,19 @@ mydata <- read.dta13("/Users/apple/Documents/LSE 3RD YEAR/EC331/data/Raw Data.dt
 mydata <- mydata[c("CITY","PCODE","CODE_P","P103","P104","P105","P106","P108","P113","PROVINCE")]
 
 # rename variables 
-mydata <- rename(mydata, c("PCODE"="HHID","CODE_P"="INDID","P103"="relationship", "P104"="hukou", "P105"="female", "P106"="age", "P108"="ethnicity", "P113"="schooling"))
+mydata <- rename(mydata, c("PCODE"="HHID","CODE_P"="INDID","P103"="relationship", "P104"="hukou", "P105"="female", "P106"="age", "P108"="minority", "P113"="schooling"))
 
-# I'm going to restrict my data to age >= 22, so that most of them have completed university education
+# I restrict my data to age >= 22, so that most of them have completed university education
 mydata <- mydata[mydata$age >= 22,]
+
+# drop missing variables
+mydata <- mydata[complete.cases(mydata),]
 
 # recode categorical variables to numeric factors
 mydata$female <- ifelse(mydata$female == "male", 0, ifelse(mydata$female == "female", 1, NA))
-#mydata$hukou <- ifelse(mydata$hukou == "Urban Hukou of the resident city (county)", 0, ifelse(mydata$hukou == "Rural Hukou of other city (or county)", 1, NA))
+# mydata$hukou <- ifelse(mydata$hukou == "Urban Hukou of the resident city (county)", 0, ifelse(mydata$hukou == "Rural Hukou of other city (or county)", 1, NA))
 mydata$minority <- as.numeric(mydata$minority == 2)
+
 
 ###helper variables###
 # I generate a bunch of helper variables for the purpose of re-formatting my data set to be regression-friendly.
@@ -47,69 +51,61 @@ mydata$child_female <- as.numeric(mydata$female == 1 & mydata$child == 1)
 
 # identify child ID, mother ID and father ID
 for (i in 1:nrow(mydata))
-{if(mydata$child[i] & is.na(mydata$child[i]) == FALSE)
-{mydata$child_ID[i] <- mydata$INDID[i]}
-  else{mydata$child_ID[i] <- NA}}
+{if(mydata$child[i]) {mydata$child_ID[i] <- mydata$INDID[i]} else{mydata$child_ID[i] <- NA}}
 
 for (i in 1:nrow(mydata))
-{if(mydata$mother[i] & is.na(mydata$mother[i]) == FALSE)
-  {mydata$mother_ID[i] <- mydata$INDID[i]}
-  else{mydata$mother_ID[i] <- NA}}
+{if(mydata$mother[i]) {mydata$mother_ID[i] <- mydata$INDID[i]}  else{mydata$mother_ID[i] <- NA}}
 
 for (i in 1:nrow(mydata))
-{if(mydata$father[i] & is.na(mydata$father[i]) == FALSE)
-  {mydata$father_ID[i] <- mydata$INDID[i]}
-  else{mydata$father_ID[i] <- NA}}
+{if(mydata$father[i]) {mydata$father_ID[i] <- mydata$INDID[i]}  else{mydata$father_ID[i] <- NA}}
 
 # identify mother's age, father's age, and child's age 
 for (i in 1:nrow(mydata))
-{if(mydata$child[i] & is.na(mydata$female[i]) == FALSE)
-  {mydata[i,"child_age"] <- mydata$age[i]}
-  else {mydata[i, "child_age"] <- NA}}
+{if(mydata$mother[i]) {mydata[i,"mother_age"] <- mydata$age[i]}  else {mydata[i, "mother_age"] <- NA}}
 
 for (i in 1:nrow(mydata))
-{if(mydata$mother[i] & is.na(mydata$female[i]) == FALSE)
-  {mydata[i,"mother_age"] <- mydata$age[i]}
-  else {mydata[i, "mother_age"] <- NA}}
+{if(mydata$father[i]) {mydata[i,"father_age"] <- mydata$age[i]} else {mydata[i, "father_age"] <- NA}}
 
 for (i in 1:nrow(mydata))
-{if(mydata$father[i] & is.na(mydata$female[i]) == FALSE)
-  {mydata[i,"father_age"] <- mydata$age[i]}
-  else {mydata[i, "father_age"] <- NA}}
+{if(mydata$child[i]) {mydata[i,"child_age"] <- mydata$age[i]}  else {mydata[i, "child_age"] <- NA}}
 
-# generate helper variables to identify mother's schooling, father's schooling, and child's schooling
+# identify mother's schooling, father's schooling, and child's schooling
 for (i in 1:nrow(mydata))
-{if(mydata$mother[i] & is.na(mydata$female[i]) == FALSE)
-  {mydata[i,"mother_schooling"] <- mydata$schooling[i]}
-  else {mydata[i, "mother_schooling"] <- NA}}
+{if(mydata$mother[i]) {mydata[i,"mother_schooling"] <- mydata$schooling[i]} else {mydata[i, "mother_schooling"] <- NA}}
 
 for (i in 1:nrow(mydata))
-{if(mydata$father[i] & is.na(mydata$female[i]) == FALSE)
-  {mydata[i,"father_schooling"] <- mydata$schooling[i]}
-  else {mydata[i, "father_schooling"] <- NA}}
+{if(mydata$father[i]) {mydata[i,"father_schooling"] <- mydata$schooling[i]}  else {mydata[i, "father_schooling"] <- NA}}
 
 for (i in 1:nrow(mydata))
-{if(mydata$relationship[i] == "Child" & is.na(mydata$female[i]) == FALSE)
-  {mydata[i,"child_schooling"] <- mydata$schooling[i]}
-  else {mydata[i, "child_schooling"] <- NA}}
+{if(mydata$child[i]) {mydata[i,"child_schooling"] <- mydata$schooling[i]}  else {mydata[i, "child_schooling"] <- NA}}
 
 
 ###re-formatting###
 # In order to make my data regression-friendly, I re-format my data set by household units. 
 # Each row contains the child's schooling and his/her mother and father's schooling along with all control variables.
 
-# First, I check for number of children in the households
+
+# First, I check for the member's relationship with the household head
+mydata$relationship <- as.character(mydata$relationship)
+sort <- rle(sort(mydata$relationship))
+relationship <- data.frame(relationship=sort$values, frequency=sort$lengths)
+list(relationship)
+# Note that individuals younger than 22 are not included in the data set.
+# The most common relationships are self, spouse, child and parent, which are incorporated in my study.
+# The rest relationships are omitted.
+# Note that although having a large frequency, child-in-law and parent-in-law are out of scope in my study. 
+
+
+# I check for the number of children in the households
 aggr <- aggregate(x=mydata["child"], by=list(household=mydata$HHID),FUN=sum, na.rm=TRUE)
 count <- rle(sort(aggr$child))
 NumberChildren <- data.frame(NumberChildren=count$values, frequency=count$lengths)
 list(NumberChildren)
-# So out of all households in the survey, there are 5308 households with 0 children, 1345 with 1 child, 175 with two children, and 7 with three children.
-# note that individuals younger than 22 are not included in the data set.
-# note that the case where the household has no children but the household head lives with parents is included in my data set.
+# Note that zero children contains the case of which the household head lives with parents.
 # I omitted the 7 three-children families in my final data set.
 
 
-# I group all household into three categories: one-child, two-children, hh-head-with-parents.
+# Therefore, I group all household into three categories: one-child, two-children, hh-head-with-parents.
 # one child: parents are matched by household code
 # two children: each child enters in a separate row and their parents enter twice in the two rows.
 # hh-head-with-parents ("self" and "parent" specified in the "relationship" column): "self" enters as the child and "parent" enters as the mother or father depending on their gender. 
@@ -119,22 +115,23 @@ list(NumberChildren)
 library(sqldf)
 
 # one-child
-OneChild <- sqldf ("SELECT HHID, INDID, SUM(child_schooling) AS child_schooling, SUM(mother_schooling) AS mother_schooling, SUM(father_schooling) AS father_schooling, 
+OneChild <- sqldf ("SELECT HHID, INDID as child_ID, SUM(child_schooling) AS child_schooling, SUM(mother_schooling) AS mother_schooling, SUM(father_schooling) AS father_schooling, 
                        SUM(child_age) AS child_age, SUM(mother_age) AS mother_age, SUM(father_age) AS father_age, SUM(mother_ID) as mother_ID, SUM(father_ID) as father_ID,
                        SUM(child_female) AS child_female, CITY, hukou, PROVINCE, minority FROM mydata GROUP BY HHID HAVING SUM(child) = 1") 
 
+
 # two-children
 # identify child1 who has the lower individual ID.
-child1 <- sqldf ("SELECT HHID, MIN(INDID) AS INDID FROM mydata WHERE child == 1 GROUP BY HHID HAVING SUM(child)==2") 
+child1 <- sqldf ("SELECT HHID, MIN(INDID) AS child_ID FROM mydata WHERE child == 1 GROUP BY HHID HAVING SUM(child)==2") 
 
 # identify child2 who has the higher individual ID.
-child2 <- sqldf ("SELECT HHID, MAX(INDID) AS INDID FROM mydata WHERE child == 1 GROUP BY HHID HAVING SUM(child)==2") 
+child2 <- sqldf ("SELECT HHID, MAX(INDID) AS child_ID FROM mydata WHERE child == 1 GROUP BY HHID HAVING SUM(child)==2") 
 
 # merge the two helper data frames by rows
 TwoChildren <- rbind(child1,child2)
 
 # left join child's characteristics
-TwoChildren <- merge(TwoChildren, mydata[,c("INDID","child_schooling","child_female","child_age", "CITY", "hukou", "PROVINCE", "minority")], by="INDID")
+TwoChildren <- merge(TwoChildren, mydata[,c("child_ID","child_schooling","child_female","child_age", "CITY", "hukou", "PROVINCE", "minority")], by="child_ID")
 
 # join parent's charateristics 
 # Different syntax is used here as HHID is not uniquely identified in the two-children case. 
@@ -142,19 +139,49 @@ TwoChildren <- merge(TwoChildren, mydata[,c("INDID","child_schooling","child_fem
 ParentInfo <- sqldf ("SELECT HHID, SUM(mother_schooling) AS mother_schooling, SUM(father_schooling) AS father_schooling, SUM(mother_age) AS mother_age, SUM(father_age) AS father_age, 
                      SUM(mother_ID) as mother_ID, SUM(father_ID) as father_ID FROM mydata GROUP BY HHID") 
 TwoChildren <- sqldf("SELECT TwoChildren.*, ParentInfo.* FROM TwoChildren INNER JOIN ParentInfo ON TwoChildren.HHID = ParentInfo.HHID;")
-TwoChildren$HHID <- NULL #remove the duplicated HHID generated from inner join
+TwoChildren$HHID <- NULL #remove the duplicated HHID generated
+
+
 
 # household head with parents
+# generate an indicator variable parent to identify the hh_head_with_parent type
+for (i in 1:nrow(mydata))
+{if(mydata$relationship[i] == "Parent") {mydata$parent[i] <- 1}  else{mydata$parent[i] <- 0}}
+
+# Generate HeadOrChild along with its ID, gender, age and schooling
+for (i in 1:nrow(mydata))
+{if(mydata$relationship[i] == "Self") {mydata$HeadOrChild[i] <- 1}  else{mydata$HeadOrChild[i] <- 0}}
+
+for (i in 1:nrow(mydata))
+{if(mydata$HeadOrChild[i]) {mydata$HeadOrChild_ID[i] <- mydata$INDID[i]} else{mydata$HeadOrChild_ID[i] <- NA}}
+
+mydata$HeadOrChild_female <- as.numeric(mydata$female == 1 & mydata$HeadOrChild == 1)
+
+for (i in 1:nrow(mydata))
+{if(mydata$HeadOrChild[i]) {mydata[i,"HeadOrChild_age"] <- mydata$age[i]}  else {mydata[i, "HeadOrChild_age"] <- NA}}
+
+for (i in 1:nrow(mydata))
+{if(mydata$HeadOrChild[i]) {mydata[i,"HeadOrChild_schooling"] <- mydata$schooling[i]}  else {mydata[i, "HeadOrChild_schooling"] <- NA}}
+
+ChildInfo <- sqldf ("SELECT HHID, sum(HeadOrChild_ID) as child_ID, sum(HeadOrChild_female) as child_female, sum(HeadOrChild_schooling) as child_schooling, sum(age) as child_age,CITY,PROVINCE,hukou,minority FROM mydata GROUP BY HHID having sum(parent) >= 1")
+
 # identify mother and father with age and schooling respectively
 Mother <- sqldf ("SELECT HHID, INDID as mother_ID, schooling as mother_schooling, age as mother_age FROM mydata where relationship = 'Parent' and female = 1") 
 Father <- sqldf ("SELECT HHID, INDID as father_ID, schooling as father_schooling, age as father_age FROM mydata where relationship = 'Parent' and female = 0") 
 
-# combine mother and father
+# combine Mother and Father
 Mother[ , c("father_schooling", "father_age","father_ID")] <- NA #create NA columns for formatting 
 Father[ , c("mother_schooling", "mother_age","mother_ID")] <- NA 
 HeadWithParent <- rbind(Mother,Father)
+HeadWithParent <- sqldf ("select * from HeadWithParent group by HHID") #group by households
+
+# combine child info
+HeadWithParent <- sqldf("SELECT HeadWithParent.*, ChildInfo.* FROM HeadWithParent INNER JOIN ChildInfo ON HeadWithParent.HHID = ChildInfo.HHID;")
+HeadWithParent$HHID <- NULL #remove the duplicated HHID generated
+
+# combine all three cases 
+CHIP2002 <- rbind(OneChild,TwoChildren,HeadWithParent)
 
 
-
-
-
+# save data set
+write.dta(CHIP2002,"CHIP2002.dta")
