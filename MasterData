@@ -34,4 +34,46 @@ mydata$female <- ifelse(mydata$female == "male", 0, ifelse(mydata$female == "fem
 #mydata$hukou <- ifelse(mydata$hukou == "Urban Hukou of the resident city (county)", 0, ifelse(mydata$hukou == "Rural Hukou of other city (or county)", 1, NA))
 mydata$minority <- as.numeric(mydata$minority == 2)
 
+# generate helper variables to identify mother, father, child and child's gender 
+mydata$mother <- as.numeric((mydata$relationship == "Self"|mydata$relationship == "Spouse") & mydata$female == 1)
+mydata$father <- as.numeric((mydata$relationship == "Self"|mydata$relationship == "Spouse") & mydata$female == 0)
+mydata$child <- as.numeric(mydata$relationship == "Child") 
+mydata$child_female <- as.numeric(mydata$female == 1 & mydata$child == 1)
+
+# generate helper variables to identify mother's age, father's age, and child's age 
+for (i in 1:nrow(mydata))
+{if(mydata$child[i] & is.na(mydata$female[i]) == FALSE)
+  {mydata[i,"child_age"] <- mydata$age[i]}
+  else {mydata[i, "child_age"] <- NA}}
+
+for (i in 1:nrow(mydata))
+{if(mydata$mother[i] & is.na(mydata$female[i]) == FALSE)
+  {mydata[i,"mother_age"] <- mydata$age[i]}
+  else {mydata[i, "mother_age"] <- NA}}
+
+for (i in 1:nrow(mydata))
+{if(mydata$father[i] & is.na(mydata$female[i]) == FALSE)
+  {mydata[i,"father_age"] <- mydata$age[i]}
+  else {mydata[i, "father_age"] <- NA}}
+
+# generate helper variables to identify mother's schooling, father's schooling, and child's schooling
+for (i in 1:nrow(mydata))
+{if(mydata$mother[i] & is.na(mydata$female[i]) == FALSE)
+  {mydata[i,"mother_schooling"] <- mydata$schooling[i]}
+  else {mydata[i, "mother_schooling"] <- NA}}
+
+for (i in 1:nrow(mydata))
+{if(mydata$father[i] & is.na(mydata$female[i]) == FALSE)
+  {mydata[i,"father_schooling"] <- mydata$schooling[i]}
+  else {mydata[i, "father_schooling"] <- NA}}
+
+for (i in 1:nrow(mydata))
+{if(mydata$relationship[i] == "Child" & is.na(mydata$female[i]) == FALSE)
+  {mydata[i,"child_schooling"] <- mydata$schooling[i]}
+  else {mydata[i, "child_schooling"] <- NA}}
+
+
+
+
+
 
