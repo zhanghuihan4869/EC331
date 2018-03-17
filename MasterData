@@ -34,13 +34,34 @@ mydata$female <- ifelse(mydata$female == "male", 0, ifelse(mydata$female == "fem
 #mydata$hukou <- ifelse(mydata$hukou == "Urban Hukou of the resident city (county)", 0, ifelse(mydata$hukou == "Rural Hukou of other city (or county)", 1, NA))
 mydata$minority <- as.numeric(mydata$minority == 2)
 
-# generate helper variables to identify mother, father, child and child's gender 
+
+# I generate a bunch of helper variables for the purpose of re-formatting my data set to be regression-friendly.
+# Some of these variables are only used in later analysis. 
+# I include all of them here for completeness.
+
+# helper variables to identify mother, father, child and child's gender 
 mydata$mother <- as.numeric((mydata$relationship == "Self"|mydata$relationship == "Spouse") & mydata$female == 1)
 mydata$father <- as.numeric((mydata$relationship == "Self"|mydata$relationship == "Spouse") & mydata$female == 0)
 mydata$child <- as.numeric(mydata$relationship == "Child") 
 mydata$child_female <- as.numeric(mydata$female == 1 & mydata$child == 1)
 
-# generate helper variables to identify mother's age, father's age, and child's age 
+# identify child ID, mother ID and father ID
+for (i in 1:nrow(mydata))
+{if(mydata$child[i] & is.na(mydata$child[i]) == FALSE)
+{mydata$child_ID[i] <- mydata$INDID[i]}
+  else{mydata$child_ID[i] <- NA}}
+
+for (i in 1:nrow(mydata))
+{if(mydata$mother[i] & is.na(mydata$mother[i]) == FALSE)
+  {mydata$mother_ID[i] <- mydata$INDID[i]}
+  else{mydata$mother_ID[i] <- NA}}
+
+for (i in 1:nrow(mydata))
+{if(mydata$father[i] & is.na(mydata$father[i]) == FALSE)
+  {mydata$father_ID[i] <- mydata$INDID[i]}
+  else{mydata$father_ID[i] <- NA}}
+
+# identify mother's age, father's age, and child's age 
 for (i in 1:nrow(mydata))
 {if(mydata$child[i] & is.na(mydata$female[i]) == FALSE)
   {mydata[i,"child_age"] <- mydata$age[i]}
@@ -72,6 +93,8 @@ for (i in 1:nrow(mydata))
   {mydata[i,"child_schooling"] <- mydata$schooling[i]}
   else {mydata[i, "child_schooling"] <- NA}}
 
+
+
 # In order to make my data regression-friendly, I re-format my data set by household units. 
 # Each row contains the child's schooling and his/her mother and father's schooling along with all control variables.
 # I group all household into three categories: one-child, two-children, household-head-living-with-parents.
@@ -79,11 +102,34 @@ for (i in 1:nrow(mydata))
 # If there are two children in the household, each child enters in a separate row and their parent's schooling enters twice in the two rows.
 # If the household structure is household-head-living-with-parents, comprising "self" and "parent" (as specified in the "relationship" column), then "self" enters as the child and "parent" enters as the mother or father depending on their gender. 
 
+# I use the sql package to help with data formatting
+library(sqldf)
 
+# one-child
+OneChild <- sqldf ("SELECT HHID, INDID, SUM(child_schooling) AS child_schooling, SUM(mother_schooling) AS mother_schooling, SUM(father_schooling) AS father_schooling, 
+                       SUM(child_age) AS child_age, SUM(mother_age) AS mother_age, SUM(father_age) AS father_age, SUM(mother_ID) as mother_ID, SUM(father_ID) as father_ID,
+                       SUM(child_female) AS child_female, CITY, hukou, PROVINCE, minority FROM mydata GROUP BY HHID HAVING SUM(child) = 1") 
 
+# two-children
+# identify child1 who has the lower individual ID.
+child1 <- sqldf ("SELECT HHID, MIN(INDID) AS INDID FROM mydata WHERE child == 1 GROUP BY HHID HAVING SUM(child)==2") 
 
+# identify child2 who has the higher individual ID.
+child2 <- sqldf ("SELECT HHID, MAX(INDID) AS INDID FROM mydata WHERE child == 1 GROUP BY HHID HAVING SUM(child)==2") 
 
+# merge the two helper data frames by rows
+TwoChildren <- rbind(child1,child2)
 
+# left join child's characteristics
+TwoChildren <- merge(TwoChildren, mydata[,c("INDID","child_schooling","child_female","child_age", "CITY", "hukou", "PROVINCE", "minority")], by="INDID")
+
+# join parent's charateristics 
+# Different syntax is used here as HHID is not uniquely identified in the two-children case. 
+# Each parent's characteristics have to enter twice for the two children.
+ParentInfo <- sqldf ("SELECT HHID, SUM(mother_schooling) AS mother_schooling, SUM(father_schooling) AS father_schooling, SUM(mother_age) AS mother_age, SUM(father_age) AS father_age, 
+                     SUM(mother_ID) as mother_ID, SUM(father_ID) as father_ID FROM mydata GROUP BY HHID") 
+TwoChildren <- sqldf("SELECT TwoChildren.*, ParentInfo.* FROM TwoChildren INNER JOIN ParentInfo ON TwoChildren.HHID = ParentInfo.HHID;")
+TwoChildren$HHID <- NULL #remove the duplicated HHID generated from inner join
 
 
 
