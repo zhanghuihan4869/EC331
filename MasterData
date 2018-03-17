@@ -34,7 +34,7 @@ mydata$female <- ifelse(mydata$female == "male", 0, ifelse(mydata$female == "fem
 #mydata$hukou <- ifelse(mydata$hukou == "Urban Hukou of the resident city (county)", 0, ifelse(mydata$hukou == "Rural Hukou of other city (or county)", 1, NA))
 mydata$minority <- as.numeric(mydata$minority == 2)
 
-
+###helper variables###
 # I generate a bunch of helper variables for the purpose of re-formatting my data set to be regression-friendly.
 # Some of these variables are only used in later analysis. 
 # I include all of them here for completeness.
@@ -94,13 +94,26 @@ for (i in 1:nrow(mydata))
   else {mydata[i, "child_schooling"] <- NA}}
 
 
-
+###re-formatting###
 # In order to make my data regression-friendly, I re-format my data set by household units. 
 # Each row contains the child's schooling and his/her mother and father's schooling along with all control variables.
-# I group all household into three categories: one-child, two-children, household-head-living-with-parents.
-# If there is one child in the household, his/her parents are matched by household code.
-# If there are two children in the household, each child enters in a separate row and their parent's schooling enters twice in the two rows.
-# If the household structure is household-head-living-with-parents, comprising "self" and "parent" (as specified in the "relationship" column), then "self" enters as the child and "parent" enters as the mother or father depending on their gender. 
+
+# First, I check for number of children in the households
+aggr <- aggregate(x=mydata["child"], by=list(household=mydata$HHID),FUN=sum, na.rm=TRUE)
+count <- rle(sort(aggr$child))
+NumberChildren <- data.frame(NumberChildren=count$values, frequency=count$lengths)
+list(NumberChildren)
+# So out of all households in the survey, there are 5308 households with 0 children, 1345 with 1 child, 175 with two children, and 7 with three children.
+# note that individuals younger than 22 are not included in the data set.
+# note that the case where the household has no children but the household head lives with parents is included in my data set.
+# I omitted the 7 three-children families in my final data set.
+
+
+# I group all household into three categories: one-child, two-children, hh-head-with-parents.
+# one child: parents are matched by household code
+# two children: each child enters in a separate row and their parents enter twice in the two rows.
+# hh-head-with-parents ("self" and "parent" specified in the "relationship" column): "self" enters as the child and "parent" enters as the mother or father depending on their gender. 
+
 
 # I use the sql package to help with data formatting
 library(sqldf)
@@ -125,11 +138,23 @@ TwoChildren <- merge(TwoChildren, mydata[,c("INDID","child_schooling","child_fem
 
 # join parent's charateristics 
 # Different syntax is used here as HHID is not uniquely identified in the two-children case. 
-# Each parent's characteristics have to enter twice for the two children.
+# note that each parent's characteristics have to enter twice for the two children.
 ParentInfo <- sqldf ("SELECT HHID, SUM(mother_schooling) AS mother_schooling, SUM(father_schooling) AS father_schooling, SUM(mother_age) AS mother_age, SUM(father_age) AS father_age, 
                      SUM(mother_ID) as mother_ID, SUM(father_ID) as father_ID FROM mydata GROUP BY HHID") 
 TwoChildren <- sqldf("SELECT TwoChildren.*, ParentInfo.* FROM TwoChildren INNER JOIN ParentInfo ON TwoChildren.HHID = ParentInfo.HHID;")
 TwoChildren$HHID <- NULL #remove the duplicated HHID generated from inner join
+
+# household head with parents
+# identify mother and father with age and schooling respectively
+Mother <- sqldf ("SELECT HHID, INDID as mother_ID, schooling as mother_schooling, age as mother_age FROM mydata where relationship = 'Parent' and female = 1") 
+Father <- sqldf ("SELECT HHID, INDID as father_ID, schooling as father_schooling, age as father_age FROM mydata where relationship = 'Parent' and female = 0") 
+
+# combine mother and father
+Mother[ , c("father_schooling", "father_age","father_ID")] <- NA #create NA columns for formatting 
+Father[ , c("mother_schooling", "mother_age","mother_ID")] <- NA 
+HeadWithParent <- rbind(Mother,Father)
+
+
 
 
 
