@@ -4,8 +4,8 @@
 # Load and install packages, note the new packages
 installation_needed  <- TRUE
 loading_needed <- TRUE
-package_list <- c('foreign', 'xtable', 'plm','gmm', 'AER','stargazer','readstata13', 'ggplot2',
-                  'boot', 'arm', 'lmtest', 'sem', 'bdynsys', 'ivpack', 'mfx', 'glm2','plyr')
+package_list <- c('foreign', 'xtable', 'plm', 'AER','stargazer','readstata13',
+                   'arm', 'lmtest', 'sem', 'bdynsys', 'ivpack', 'mfx', 'glm2','plyr')
 if(installation_needed){install.packages(package_list, repos='http://cran.us.r-project.org')}
 if(loading_needed){lapply(package_list, require, character.only = TRUE)}
 
@@ -85,10 +85,10 @@ for (i in 1:nrow(mydata))
 {if(mydata$relationship[i] == "Parent") {mydata$parent[i] <- 1}  else{mydata$parent[i] <- 0}}
 
 # Generate HeadOrChild along with its ID, gender, age and schooling
-mydata$HeadOrChild_female <- as.numeric(mydata$female == 1 & mydata$HeadOrChild == 1)
-
 for (i in 1:nrow(mydata))
 {if(mydata$relationship[i] == "Self") {mydata$HeadOrChild[i] <- 1}  else{mydata$HeadOrChild[i] <- 0}}
+
+mydata$HeadOrChild_female <- as.numeric(mydata$female == 1 & mydata$HeadOrChild == 1)
 
 for (i in 1:nrow(mydata))
 {if(mydata$HeadOrChild[i]) {mydata$HeadOrChild_ID[i] <- mydata$INDID[i]} else{mydata$HeadOrChild_ID[i] <- NA}}
@@ -100,10 +100,11 @@ for (i in 1:nrow(mydata))
 {if(mydata$HeadOrChild[i]) {mydata[i,"HeadOrChild_schooling"] <- mydata$schooling[i]}  else {mydata[i, "HeadOrChild_schooling"] <- NA}}
 
 
+
+
 ###re-formatting###
 # In order to make my data regression-friendly, I re-format my data set by household units. 
 # Each row contains the child's schooling and his/her mother and father's schooling along with all control variables.
-
 
 # First, I check for the member's relationship with the household head
 mydata$relationship <- as.character(mydata$relationship)
@@ -115,8 +116,7 @@ list(relationship)
 # The rest relationships are omitted.
 # Note that although having a large frequency, child-in-law and parent-in-law are out of scope in my study. 
 
-
-# I check for the number of children in the households
+# Then I check for the number of children in the households
 aggr <- aggregate(x=mydata["child"], by=list(household=mydata$HHID),FUN=sum, na.rm=TRUE)
 count <- rle(sort(aggr$child))
 NumberChildren <- data.frame(NumberChildren=count$values, frequency=count$lengths)
@@ -131,6 +131,7 @@ list(NumberChildren)
 # hh-head-with-parents ("self" and "parent" specified in the "relationship" column): "self" enters as the child and "parent" enters as the mother or father depending on their gender. 
 
 
+
 # I use the sql package to help with data formatting
 library(sqldf)
 
@@ -138,7 +139,6 @@ library(sqldf)
 OneChild <- sqldf ("SELECT HHID, INDID as child_ID, SUM(child_schooling) AS child_schooling, SUM(mother_schooling) AS mother_schooling, SUM(father_schooling) AS father_schooling, 
                        SUM(child_age) AS child_age, SUM(mother_age) AS mother_age, SUM(father_age) AS father_age, SUM(mother_ID) as mother_ID, SUM(father_ID) as father_ID,
                        SUM(child_female) AS child_female, CITY, hukou, PROVINCE, minority FROM mydata GROUP BY HHID HAVING SUM(child) = 1") 
-
 
 # two-children
 # identify child1 who has the lower individual ID.
@@ -163,12 +163,15 @@ TwoChildren$HHID <- NULL #remove the duplicated HHID generated
 
 
 # household head with parents
+# Understand this household type, many parents are single parents. 
+# Either mother or father can enter as NA. I did not omit the NA cases because I analyse father and mother separately, hence single parent observations are relevant.
+# The NA cases are taken care of explicitely in later manipulation
 # identify mother and father with age and schooling respectively
 Mother <- sqldf ("SELECT HHID, INDID as mother_ID, schooling as mother_schooling, age as mother_age FROM mydata where relationship = 'Parent' and female = 1") 
 Father <- sqldf ("SELECT HHID, INDID as father_ID, schooling as father_schooling, age as father_age FROM mydata where relationship = 'Parent' and female = 0") 
 
 # combine Mother and Father
-Mother[ , c("father_schooling", "father_age","father_ID")] <- NA #create NA columns for formatting 
+Mother[ , c("father_schooling", "father_age","father_ID")] <- NA #create NA columns for formatting purposes
 Father[ , c("mother_schooling", "mother_age","mother_ID")] <- NA 
 HeadWithParent <- rbind(Mother,Father)
 HeadWithParent <- sqldf ("select * from HeadWithParent group by HHID") #group by households
@@ -182,11 +185,84 @@ HeadWithParent$HHID <- NULL #remove the duplicated HHID generated
 
 # combine all three cases to obtain the data set for level-level regressions. 
 CHIP2002 <- rbind(OneChild,TwoChildren,HeadWithParent)
-summary(CHIP2002)
+#summary(CHIP2002)
 
-# Next, I rank children's education within their birth cohort, as well as their fathers' rank among the fathers of children in that cohort.
-# I divide all children into early and late cohorts, where early cohort were born before 1971 and late cohort were born in or after 1972.
+
+
+### rank children and their parents###
+# First, I divide all children into early and late cohorts, where early cohort were born before 1971 and late cohort were born in or after 1972.
 # Massive economic reforms occurred since 1978, by then most of the late cohort has started primary education.
 # break up cohorts
 CHIP2002$agecat <- ifelse(CHIP2002$child_age > 30,c("late"), c("early")) 
+CHIP2002 <- CHIP2002[!is.na(CHIP2002$agecat),]
+Early <- CHIP2002[CHIP2002$agecat == "early",]
+Late <- CHIP2002[CHIP2002$agecat == "late",]
 
+# Next, I rank children's education within their birth cohort, as well as their fathers' rank among the fathers of children in that cohort.
+# percentile rank function
+rank <- function(L,E,n) {
+  #n=total number of observations
+  #L=number of data less than the data point
+  #E=frequency of the data of interest
+  (L + 0.5*E)/n }
+
+#child Lc and Ec
+#early
+for (i in 1:nrow(Early))
+{ {Early[i,'Lc'] <- length(which(Early$child_schooling[i] > Early$child_schooling) )
+Early[i,'Ec'] <- length(which(Early$child_schooling == Early$child_schooling[i]) )}}
+
+#late
+for (i in 1:nrow(Late))
+{ if (Late$agecat[i] == "late")
+{Late[i,'Lc'] <- length(which(Late$child_schooling[i] > Late$child_schooling) )
+Late[i,'Ec'] <- length(which(Late$child_schooling == Late$child_schooling[i]) )}}
+
+
+#mother Lm and Em
+#early
+for (i in 1:nrow(Early))
+{ 
+  {Early[i,'Lm'] <- length(which(Early$mother_schooling[i] > Early$mother_schooling) )
+  Early[i,'Em'] <- length(which(Early$mother_schooling == Early$mother_schooling[i]) )}}
+
+#late
+for (i in 1:nrow(Late))
+{ if (Late$agecat[i] == "late")
+{Late[i,'Lm'] <- length(which(Late$mother_schooling[i] > Late$mother_schooling) )
+Late[i,'Em'] <- length(which(Late$mother_schooling == Late$mother_schooling[i]) )}}
+
+#father Lf and Ef
+#early
+for (i in 1:nrow(Early))
+{ 
+  {Early[i,'Lf'] <- length(which(Early$father_schooling[i] > Early$father_schooling) )
+  Early[i,'Ef'] <- length(which(Early$father_schooling == Early$father_schooling[i]) )}}
+
+#late
+for (i in 1:nrow(Late))
+{ if (Late$agecat[i] == "late")
+{Late[i,'Lf'] <- length(which(Late$father_schooling[i] > Late$father_schooling) )
+Late[i,'Ef'] <- length(which(Late$father_schooling == Late$father_schooling[i]) )}}
+
+# combine both cohorts
+CHIP2002 <- rbind(Early,Late)
+
+# Correct for NA cases in mother_schooling and father_schooling (resulted from self-parent case as discussed earlier). 
+# note that due to code construction, both zero and NA cases yield Lm = 0 but Em = 0 only if mother_schooling is NA. This is because there are repeated observations for zero education, whereas NA always yields length = 0.
+for (i in 1:nrow(CHIP2002)) {if (CHIP2002$Em[i] == 0) {CHIP2002$Em[i] <- NA}}
+for (i in 1:nrow(CHIP2002)) {if (CHIP2002$Ef[i] == 0) {CHIP2002$Ef[i] <- NA}}
+
+#n
+nEARLY <- length(CHIP2002[CHIP2002$agecat=="early",]$child_schooling)
+nLATE <- length(CHIP2002[CHIP2002$agecat=="late",]$child_schooling)
+CHIP2002$n <- ifelse(CHIP2002$agecat == "early", n <- nEARLY, n <- nLATE) 
+
+# calculate rank
+CHIP2002$ChildRank <- rank(CHIP2002$Lc,CHIP2002$Ec,CHIP2002$n)
+CHIP2002$MotherRank <- rank(CHIP2002$Lm,CHIP2002$Em,CHIP2002$n)
+CHIP2002$FatherRank <- rank(CHIP2002$Lf,CHIP2002$Ef,CHIP2002$n)
+
+
+# save data set
+write.dta(CHIP2002,"CHIP2002.dta")
