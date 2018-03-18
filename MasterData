@@ -32,11 +32,11 @@ mydata <- mydata[mydata$age >= 22,]
 # drop missing variables
 mydata <- mydata[complete.cases(mydata),]
 
-# recode categorical variables to numeric factors
+# recode categorical variables to numeric factors; PROVINCE and CITY as factors.
 mydata$female <- ifelse(mydata$female == "male", 0, ifelse(mydata$female == "female", 1, NA))
-# mydata$hukou <- ifelse(mydata$hukou == "Urban Hukou of the resident city (county)", 0, ifelse(mydata$hukou == "Rural Hukou of other city (or county)", 1, NA))
 mydata$minority <- as.numeric(mydata$minority == 2)
-
+mydata$PROVINCE <- as.factor(mydata$PROVINCE)
+mydata$CITY <- as.factor(mydata$CITY)
 
 ###helper variables###
 # I generate a bunch of helper variables for the purpose of re-formatting my data set to be regression-friendly.
@@ -78,6 +78,26 @@ for (i in 1:nrow(mydata))
 
 for (i in 1:nrow(mydata))
 {if(mydata$child[i]) {mydata[i,"child_schooling"] <- mydata$schooling[i]}  else {mydata[i, "child_schooling"] <- NA}}
+
+# I create a separate set of variables to identify child and parent in the household-head-living-with-parent type.
+# generate an indicator variable parent to identify the hh_head_with_parent type
+for (i in 1:nrow(mydata))
+{if(mydata$relationship[i] == "Parent") {mydata$parent[i] <- 1}  else{mydata$parent[i] <- 0}}
+
+# Generate HeadOrChild along with its ID, gender, age and schooling
+mydata$HeadOrChild_female <- as.numeric(mydata$female == 1 & mydata$HeadOrChild == 1)
+
+for (i in 1:nrow(mydata))
+{if(mydata$relationship[i] == "Self") {mydata$HeadOrChild[i] <- 1}  else{mydata$HeadOrChild[i] <- 0}}
+
+for (i in 1:nrow(mydata))
+{if(mydata$HeadOrChild[i]) {mydata$HeadOrChild_ID[i] <- mydata$INDID[i]} else{mydata$HeadOrChild_ID[i] <- NA}}
+
+for (i in 1:nrow(mydata))
+{if(mydata$HeadOrChild[i]) {mydata[i,"HeadOrChild_age"] <- mydata$age[i]}  else {mydata[i, "HeadOrChild_age"] <- NA}}
+
+for (i in 1:nrow(mydata))
+{if(mydata$HeadOrChild[i]) {mydata[i,"HeadOrChild_schooling"] <- mydata$schooling[i]}  else {mydata[i, "HeadOrChild_schooling"] <- NA}}
 
 
 ###re-formatting###
@@ -142,29 +162,7 @@ TwoChildren <- sqldf("SELECT TwoChildren.*, ParentInfo.* FROM TwoChildren INNER 
 TwoChildren$HHID <- NULL #remove the duplicated HHID generated
 
 
-
 # household head with parents
-# generate an indicator variable parent to identify the hh_head_with_parent type
-for (i in 1:nrow(mydata))
-{if(mydata$relationship[i] == "Parent") {mydata$parent[i] <- 1}  else{mydata$parent[i] <- 0}}
-
-# Generate HeadOrChild along with its ID, gender, age and schooling
-for (i in 1:nrow(mydata))
-{if(mydata$relationship[i] == "Self") {mydata$HeadOrChild[i] <- 1}  else{mydata$HeadOrChild[i] <- 0}}
-
-for (i in 1:nrow(mydata))
-{if(mydata$HeadOrChild[i]) {mydata$HeadOrChild_ID[i] <- mydata$INDID[i]} else{mydata$HeadOrChild_ID[i] <- NA}}
-
-mydata$HeadOrChild_female <- as.numeric(mydata$female == 1 & mydata$HeadOrChild == 1)
-
-for (i in 1:nrow(mydata))
-{if(mydata$HeadOrChild[i]) {mydata[i,"HeadOrChild_age"] <- mydata$age[i]}  else {mydata[i, "HeadOrChild_age"] <- NA}}
-
-for (i in 1:nrow(mydata))
-{if(mydata$HeadOrChild[i]) {mydata[i,"HeadOrChild_schooling"] <- mydata$schooling[i]}  else {mydata[i, "HeadOrChild_schooling"] <- NA}}
-
-ChildInfo <- sqldf ("SELECT HHID, sum(HeadOrChild_ID) as child_ID, sum(HeadOrChild_female) as child_female, sum(HeadOrChild_schooling) as child_schooling, sum(age) as child_age,CITY,PROVINCE,hukou,minority FROM mydata GROUP BY HHID having sum(parent) >= 1")
-
 # identify mother and father with age and schooling respectively
 Mother <- sqldf ("SELECT HHID, INDID as mother_ID, schooling as mother_schooling, age as mother_age FROM mydata where relationship = 'Parent' and female = 1") 
 Father <- sqldf ("SELECT HHID, INDID as father_ID, schooling as father_schooling, age as father_age FROM mydata where relationship = 'Parent' and female = 0") 
@@ -175,13 +173,17 @@ Father[ , c("mother_schooling", "mother_age","mother_ID")] <- NA
 HeadWithParent <- rbind(Mother,Father)
 HeadWithParent <- sqldf ("select * from HeadWithParent group by HHID") #group by households
 
+# create a dataframe to contain child's info.
+ChildInfo <- sqldf ("SELECT HHID, sum(HeadOrChild_ID) as child_ID, sum(HeadOrChild_female) as child_female, sum(HeadOrChild_schooling) as child_schooling, sum(HeadOrChild_age) as child_age,CITY,PROVINCE,hukou,minority FROM mydata GROUP BY HHID having sum(parent) >= 1")
+
 # combine child info
 HeadWithParent <- sqldf("SELECT HeadWithParent.*, ChildInfo.* FROM HeadWithParent INNER JOIN ChildInfo ON HeadWithParent.HHID = ChildInfo.HHID;")
 HeadWithParent$HHID <- NULL #remove the duplicated HHID generated
 
-# combine all three cases 
+# combine all three cases to obtain the data set for level-level regressions. 
 CHIP2002 <- rbind(OneChild,TwoChildren,HeadWithParent)
+summary(CHIP2002)
+
+# Next, I rank children's educatio within their birth cohort, as well as their fathers' rank among the fathers of children in that cohort.
 
 
-# save data set
-write.dta(CHIP2002,"CHIP2002.dta")
