@@ -193,7 +193,7 @@ CHIP2002 <- rbind(OneChild,TwoChildren,HeadWithParent)
 # First, I divide all children into early and late cohorts, where early cohort were born before 1971 and late cohort were born in or after 1972.
 # Massive economic reforms occurred since 1978, by then most of the late cohort has started primary education.
 # break up cohorts
-CHIP2002$agecat <- ifelse(CHIP2002$child_age > 30,c("late"), c("early")) 
+CHIP2002$agecat <- ifelse(CHIP2002$child_age > 30,c("early"), c("late")) 
 CHIP2002 <- CHIP2002[!is.na(CHIP2002$agecat),]
 Early <- CHIP2002[CHIP2002$agecat == "early",]
 Late <- CHIP2002[CHIP2002$agecat == "late",]
@@ -241,7 +241,7 @@ for (i in 1:nrow(Early))
 
 #late
 for (i in 1:nrow(Late))
-{ if (Late$agecat[i] == "late")
+{
 {Late[i,'Lf'] <- length(which(Late$father_schooling[i] > Late$father_schooling) )
 Late[i,'Ef'] <- length(which(Late$father_schooling == Late$father_schooling[i]) )}}
 
@@ -254,15 +254,38 @@ for (i in 1:nrow(CHIP2002)) {if (CHIP2002$Em[i] == 0) {CHIP2002$Em[i] <- NA}}
 for (i in 1:nrow(CHIP2002)) {if (CHIP2002$Ef[i] == 0) {CHIP2002$Ef[i] <- NA}}
 
 #n
-nEARLY <- length(CHIP2002[CHIP2002$agecat=="early",]$child_schooling)
-nLATE <- length(CHIP2002[CHIP2002$agecat=="late",]$child_schooling)
-CHIP2002$n <- ifelse(CHIP2002$agecat == "early", n <- nEARLY, n <- nLATE) 
+CHIP2002$Nc <- ifelse(CHIP2002$agecat == "early", Nc <- length(Early$child_schooling), Nc <- length(Late$child_schooling)) 
+CHIP2002$Nm <- ifelse(CHIP2002$agecat == "early", Nm <- sum(!is.na(Early$mother_schooling)) , Nm <- sum(!is.na(Late$mother_schooling))) 
+CHIP2002$Nf <- ifelse(CHIP2002$agecat == "early", Nf <- sum(!is.na(Early$father_schooling)) , Nf <- sum(!is.na(Late$father_schooling))) 
 
 # calculate rank
-CHIP2002$ChildRank <- rank(CHIP2002$Lc,CHIP2002$Ec,CHIP2002$n)
-CHIP2002$MotherRank <- rank(CHIP2002$Lm,CHIP2002$Em,CHIP2002$n)
-CHIP2002$FatherRank <- rank(CHIP2002$Lf,CHIP2002$Ef,CHIP2002$n)
+CHIP2002$ChildRank <- rank(CHIP2002$Lc,CHIP2002$Ec,CHIP2002$Nc)
+CHIP2002$MotherRank <- rank(CHIP2002$Lm,CHIP2002$Em,CHIP2002$Nm)
+CHIP2002$FatherRank <- rank(CHIP2002$Lf,CHIP2002$Ef,CHIP2002$Nf)
 
+# Generate Child's, mother's and father's quintile groups from their ranks
+attach(CHIP2002)
+CHIP2002$ChildQuintile[CHIP2002$ChildRank<=0.2] <- "1"
+CHIP2002$ChildQuintile[CHIP2002$ChildRank>0.2 & CHIP2002$ChildRank<=0.4] <- "2"
+CHIP2002$ChildQuintile[CHIP2002$ChildRank>0.4 & CHIP2002$ChildRank<=0.6] <- "3"
+CHIP2002$ChildQuintile[CHIP2002$ChildRank>0.6 & CHIP2002$ChildRank<=0.8] <- "4"
+CHIP2002$ChildQuintile[CHIP2002$ChildRank>0.8] <- "5"
+detach(CHIP2002)
 
-# save data set
+attach(CHIP2002)
+CHIP2002$MotherQuintile[CHIP2002$MotherRank<=0.2] <- "1"
+CHIP2002$MotherQuintile[CHIP2002$MotherRank>0.2 & CHIP2002$MotherRank<=0.4] <- "2"
+CHIP2002$MotherQuintile[CHIP2002$MotherRank>0.4 & CHIP2002$MotherRank<=0.6] <- "3"
+CHIP2002$MotherQuintile[CHIP2002$MotherRank>0.6 & CHIP2002$MotherRank<=0.8] <- "4"
+CHIP2002$MotherQuintile[CHIP2002$MotherRank>0.8] <- "5"
+detach(CHIP2002)
+
+attach(CHIP2002)
+CHIP2002$FatherQuintile[CHIP2002$FatherRank<=0.2] <- "1"
+CHIP2002$FatherQuintile[CHIP2002$FatherRank>0.2 & CHIP2002$FatherRank<=0.4] <- "2"
+CHIP2002$FatherQuintile[CHIP2002$FatherRank>0.4 & CHIP2002$FatherRank<=0.6] <- "3"
+CHIP2002$FatherQuintile[CHIP2002$FatherRank>0.6 & CHIP2002$FatherRank<=0.8] <- "4"
+CHIP2002$FatherQuintile[CHIP2002$FatherRank>0.8] <- "5"
+detach(CHIP2002)
+
 write.dta(CHIP2002,"CHIP2002.dta")
