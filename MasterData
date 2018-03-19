@@ -1,4 +1,6 @@
 ###Output my data set from raw data###
+#Tentative notes to myself: old definition of percentile rank -- less than plus half equal to over total.
+
 #Huihan Zhang
 
 # Load and install packages, note the new packages
