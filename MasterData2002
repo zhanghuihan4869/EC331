@@ -192,10 +192,10 @@ CHIP2002 <- rbind(OneChild,TwoChildren,HeadWithParent)
 
 
 ### rank children and their parents###
-# First, I divide all children into early and late cohorts, where early cohort were born before 1971 and late cohort were born in or after 1972.
+# First, I divide all children into early and late cohorts, where early cohort were born before 1971 and late cohort were born in or after 1971.
 # Massive economic reforms occurred since 1978, by then most of the late cohort has started primary education.
 # break up cohorts
-CHIP2002$agecat <- ifelse(CHIP2002$child_age > 30,c("early"), c("late")) 
+CHIP2002$agecat <- ifelse(CHIP2002$child_age > 31,c("early"), c("late")) 
 CHIP2002 <- CHIP2002[!is.na(CHIP2002$agecat),]
 Early <- CHIP2002[CHIP2002$agecat == "early",]
 Late <- CHIP2002[CHIP2002$agecat == "late",]
