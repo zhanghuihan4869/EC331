@@ -1,0 +1,96 @@
+###Output my data set from raw data###
+#Tentative notes to myself: old definition of percentile rank -- less than plus half equal to over total.
+#Huihan Zhang
+
+# Load and install packages, note the new packages
+installation_needed  <- TRUE
+loading_needed <- TRUE
+package_list <- c('foreign', 'xtable', "sandwich", 'plm', 'AER','stargazer','readstata13', "multiwayvcov",
+                  'arm', 'lmtest', 'sem', 'bdynsys', 'ivpack', 'mfx', 'glm2','plyr')
+if(installation_needed){install.packages(package_list, repos='http://cran.us.r-project.org')}
+if(loading_needed){lapply(package_list, require, character.only = TRUE)}
+
+
+# clear the global workspace
+rm(list=ls())
+
+# set working directory (only works on my computer)
+# uncomment this before running the codes
+setwd("/Users/apple/Documents/LSE 3RD YEAR/EC331/data/MasterData")
+
+# load data
+mydata <- read.dta13("CHIP2002and1995.dta")
+
+
+
+# Level to level regression: Child schooling years on parent schooling years
+#All children
+schooling_year_mother <- lm(child_schooling ~ mother_schooling + child_female + child_age + PROVINCE + minority, data = mydata)
+summary(schooling_year_mother)
+clseSYM <- sqrt(diag(cluster.vcov(schooling_year_mother, mydata$HHID))) 
+
+schooling_year_father <- lm(child_schooling ~ father_schooling + child_female + child_age + PROVINCE + minority, data = mydata)
+summary(schooling_year_father)
+clseSYF <- sqrt(diag(cluster.vcov(schooling_year_father, mydata$HHID))) 
+
+# daughters vs sons
+daughter <- mydata[mydata$child_female==1,]
+son <- mydata[mydata$child_female==0,]
+
+# daughter
+schooling_year_mother_daughter <- lm(child_schooling ~ mother_schooling + child_age + PROVINCE + minority, data = daughter)
+summary(schooling_year_mother_daughter)
+clseSYMD <- sqrt(diag(cluster.vcov(schooling_year_mother_daughter, daughter$HHID))) 
+
+schooling_year_father_daughter <- lm(child_schooling ~ father_schooling + child_age + PROVINCE + minority, data = daughter)
+summary(schooling_year_father_daughter)
+clseSYFD <- sqrt(diag(cluster.vcov(schooling_year_father_daughter, daughter$HHID))) 
+
+# son
+schooling_year_mother_son <- lm(child_schooling ~ mother_schooling + child_age + PROVINCE + minority, data = son)
+summary(schooling_year_mother_son)
+clseSYMS <- sqrt(diag(cluster.vcov(schooling_year_mother_son, son$HHID))) 
+
+schooling_year_father_son <- lm(child_schooling ~ father_schooling + child_age + PROVINCE + minority, data = son)
+summary(schooling_year_father_son)
+clseSYFS <- sqrt(diag(cluster.vcov(schooling_year_father_son, son$HHID))) 
+
+# output regression results
+stargazer(schooling_year_mother,schooling_year_father, se=list(clseSYM,clseSYF))
+stargazer(schooling_year_mother_daughter,schooling_year_father_daughter, se=list(clseSYMD,clseSYFD))
+stargazer(schooling_year_mother_son,schooling_year_father_son, se=list(clseSYMS,clseSYFS))
+
+
+
+# Rank to rank regression
+#All children
+rank_mother <- lm(ChildRank ~ MotherRank + child_female + child_age + PROVINCE + minority, data = mydata)
+summary(rank_mother)
+clseRM <- sqrt(diag(cluster.vcov(rank_mother, mydata$HHID))) 
+
+rank_father <- lm(ChildRank ~ FatherRank + child_female + child_age + PROVINCE + minority, data = mydata)
+summary(rank_father)
+clseRF <- sqrt(diag(cluster.vcov(rank_father, mydata$HHID))) 
+
+# daughter
+rank_mother_daughter <- lm(ChildRank ~ MotherRank + child_age + PROVINCE + minority, data = daughter)
+summary(rank_mother_daughter)
+clseRMD <- sqrt(diag(cluster.vcov(rank_mother_daughter, daughter$HHID))) 
+
+rank_father_daughter <- lm(ChildRank ~ FatherRank + child_age + PROVINCE + minority, data = daughter)
+summary(rank_father_daughter)
+clseRFD <- sqrt(diag(cluster.vcov(rank_father_daughter, daughter$HHID))) 
+
+# son
+rank_mother_son <- lm(ChildRank ~ MotherRank + child_age + PROVINCE + minority, data = son)
+summary(rank_mother_son)
+clseRMS <- sqrt(diag(cluster.vcov(rank_mother_son, son$HHID))) 
+
+rank_father_son <- lm(ChildRank ~ FatherRank + child_age + PROVINCE + minority, data = son)
+summary(rank_father_son)
+clseRFS <- sqrt(diag(cluster.vcov(rank_father_son, son$HHID))) 
+
+# output regression results
+stargazer(rank_mother, rank_father, se=list(clseRM,clseRF))
+stargazer(rank_mother_daughter, rank_father_daughter, se=list(clseRMD,clseRFD))
+stargazer(rank_mother_son, rank_father_son, se=list(clseRMS,clseRFS))
