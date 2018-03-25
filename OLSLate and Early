@@ -24,6 +24,31 @@ mydata <- read.dta13("CHIP2002and1995.dta")
 # generate parent_schooling = average of mother and father schooling
 mydata$parent_schooling <- rowMeans(mydata[c('mother_schooling', 'father_schooling')], na.rm=TRUE)
 
+#generate ParentRank
+rank <- function(L,E,n) {
+  #n=total number of observations
+  #L=number of data less than the data point
+  #E=frequency of the data of interest
+  (L + 0.5*E)/n }
+
+# subset early and late cohorts
+Early <- mydata[mydata$agecat == "early",]
+Late <- mydata[mydata$agecat == "late",]
+
+# rank parental education in early cohort
+for (i in 1:nrow(Early))
+{Early[i,'Lp'] <- length(which(Early$parent_schooling[i] > Early$parent_schooling) )
+Early[i,'Ep'] <- length(which(Early$parent_schooling == Early$parent_schooling[i]) )}
+
+# rank parental education in late cohort
+for (i in 1:nrow(Late))
+{{Late[i,'Lp'] <- length(which(Late$parent_schooling[i] > Late$parent_schooling) )
+Late[i,'Ep'] <- length(which(Late$parent_schooling == Late$parent_schooling[i]) )}}
+
+mydata <- rbind(Early,Late)
+mydata$Np <- ifelse(mydata$agecat == "early", Np <- sum(!is.na(Early$parent_schooling)) , Np <- sum(!is.na(Late$parent_schooling))) 
+mydata$ParentRank <- rank(mydata$Lp,mydata$Ep,mydata$Np)
+
 # subset early and late cohorts
 Early <- mydata[mydata$agecat == "early",]
 Late <- mydata[mydata$agecat == "late",]
@@ -175,33 +200,48 @@ t.test2(coef(schooling_year_late_son)[2] * sdPLS / sdCLS, coef(schooling_year_ea
 
 # Rank to rank regression
 #All children
-rank_mother <- lm(ChildRank ~ MotherRank + child_female + child_age + PROVINCE + minority, data = mydata)
-summary(rank_mother)
-clseRM <- sqrt(diag(cluster.vcov(rank_mother, mydata$HHID))) 
+rank_early <- lm(ChildRank ~ ParentRank + child_female + child_age + PROVINCE + minority, data = Early)
+summary(rank_early)
+clseRE <- sqrt(diag(cluster.vcov(rank_early, Early$HHID))) 
+clseRE
 
-rank_father <- lm(ChildRank ~ FatherRank + child_female + child_age + PROVINCE + minority, data = mydata)
-summary(rank_father)
-clseRF <- sqrt(diag(cluster.vcov(rank_father, mydata$HHID))) 
+rank_late <- lm(ChildRank ~ ParentRank + child_female + child_age + PROVINCE + minority, data = Late)
+summary(rank_late)
+clseRL <- sqrt(diag(cluster.vcov(rank_late, Late$HHID))) 
+clseRL
 
-# daughter
-rank_mother_daughter <- lm(ChildRank ~ MotherRank + child_age + PROVINCE + minority, data = daughter)
-summary(rank_mother_daughter)
-clseRMD <- sqrt(diag(cluster.vcov(rank_mother_daughter, daughter$HHID))) 
+t.test2(coef(rank_late)[2],coef(rank_early)[2],clseRL[2], clseRE[2],length(Late),length(Early))
 
-rank_father_daughter <- lm(ChildRank ~ FatherRank + child_age + PROVINCE + minority, data = daughter)
-summary(rank_father_daughter)
-clseRFD <- sqrt(diag(cluster.vcov(rank_father_daughter, daughter$HHID))) 
 
-# son
-rank_mother_son <- lm(ChildRank ~ MotherRank + child_age + PROVINCE + minority, data = son)
-summary(rank_mother_son)
-clseRMS <- sqrt(diag(cluster.vcov(rank_mother_son, son$HHID))) 
+# Daughter
+# early
+rank_early_daughter <- lm(ChildRank ~ ParentRank + child_age + PROVINCE + minority, data = daughterE)
+summary(rank_early_daughter)
+clseRED <- sqrt(diag(cluster.vcov(rank_early_daughter, daughterE$HHID))) 
+clseRED[2]
 
-rank_father_son <- lm(ChildRank ~ FatherRank + child_age + PROVINCE + minority, data = son)
-summary(rank_father_son)
-clseRFS <- sqrt(diag(cluster.vcov(rank_father_son, son$HHID))) 
+#late
+rank_late_daughter <- lm(ChildRank ~ ParentRank + child_age + PROVINCE + minority, data = daughterL)
+summary(rank_late_daughter)
+clseRLD <- sqrt(diag(cluster.vcov(rank_late_daughter, daughterL$HHID))) 
+clseRLD[2]
 
-# output regression results
-stargazer(rank_mother, rank_father, se=list(clseRM,clseRF))
-stargazer(rank_mother_daughter, rank_father_daughter, se=list(clseRMD,clseRFD))
-stargazer(rank_mother_son, rank_father_son, se=list(clseRMS,clseRFS))
+# test for change in estimates
+t.test2(coef(rank_late_daughter)[2],coef(rank_early_daughter)[2],clseRED[2], clseRLD[2], length(daughterL),length(daughterE))
+
+
+# Son
+# early
+rank_early_son <- lm(ChildRank ~ ParentRank + child_age + PROVINCE + minority, data = sonE)
+summary(rank_early_son)
+clseRES <- sqrt(diag(cluster.vcov(rank_early_son, sonE$HHID))) 
+clseRES[2]
+
+#late
+rank_late_son <- lm(ChildRank ~ ParentRank + child_age + PROVINCE + minority, data = sonL)
+summary(rank_late_son)
+clseRLS <- sqrt(diag(cluster.vcov(rank_late_son, sonL$HHID))) 
+clseRLS[2]
+
+# test for change in estimates
+t.test2(coef(rank_late_son)[2],coef(rank_early_son)[2],clseRES[2], clseRLS[2], length(sonL),length(sonE))
