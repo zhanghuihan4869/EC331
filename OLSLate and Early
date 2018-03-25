@@ -1,0 +1,207 @@
+###OLS regression output###
+#Intergenerational Educational Association by birth cohort
+#Huihan Zhang
+
+# Load and install packages, note the new packages
+installation_needed  <- TRUE
+loading_needed <- TRUE
+package_list <- c('foreign', 'xtable', "sandwich", 'plm', 'AER','stargazer','readstata13', "multiwayvcov",
+                  'arm', 'lmtest', 'sem', 'bdynsys', 'ivpack', 'mfx', 'glm2','plyr')
+if(installation_needed){install.packages(package_list, repos='http://cran.us.r-project.org')}
+if(loading_needed){lapply(package_list, require, character.only = TRUE)}
+
+
+# clear the global workspace
+rm(list=ls())
+
+# set working directory (only works on my computer)
+# uncomment this before running the codes
+setwd("/Users/apple/Documents/LSE 3RD YEAR/EC331/data/MasterData")
+
+# load data
+mydata <- read.dta13("CHIP2002and1995.dta")
+
+# generate parent_schooling = average of mother and father schooling
+mydata$parent_schooling <- rowMeans(mydata[c('mother_schooling', 'father_schooling')], na.rm=TRUE)
+
+# subset early and late cohorts
+Early <- mydata[mydata$agecat == "early",]
+Late <- mydata[mydata$agecat == "late",]
+
+# subset daughters and sons
+daughterE <- Early[Early$child_female==1,]
+sonE <- Early[Early$child_female==0,]
+daughterL <- Late[Late$child_female==1,]
+sonL <- Late[Late$child_female==0,]
+
+# define a t test to test for change in coefficient estimates 
+t.test2 <- function(m1,m2,s1,s2,n1,n2,equal.variance=FALSE)
+{   se <- sqrt( (s1^2) + (s2^2) )
+    df <- n1+n2-2
+  t <- (m1-m2)/se 
+  dat <- c(m1-m2, se, t, 2*pt(-abs(t),df))    
+  names(dat) <- c("Difference of means", "Std Error", "t", "p-value")
+  return(dat) 
+}
+
+p <- function(mu,sd) {2*pt(-abs(mu/sd))}
+
+# Level to level regression: Child schooling years on parent schooling years
+#All children
+# early
+schooling_year_early <- lm(child_schooling ~ parent_schooling + child_female + child_age + PROVINCE + minority, data = Early)
+summary(schooling_year_early)
+clseSYE <- sqrt(diag(cluster.vcov(schooling_year_early, Early$HHID))) 
+clseSYE[2]
+
+# late
+schooling_year_late <- lm(child_schooling ~ parent_schooling + child_female + child_age + PROVINCE + minority, data = Late)
+summary(schooling_year_late)
+clseSYL <- sqrt(diag(cluster.vcov(schooling_year_late, Late$HHID))) 
+clseSYL[2]
+
+# test for change in estimates
+t.test2(coef(schooling_year_late)[2],coef(schooling_year_early)[2],clseSYL[2], clseSYE[2],length(Late),length(Early))
+
+
+
+# Daughter
+# early
+schooling_year_early_daughter <- lm(child_schooling ~ parent_schooling + child_age + PROVINCE + minority, data = daughterE)
+summary(schooling_year_early_daughter)
+clseSYED <- sqrt(diag(cluster.vcov(schooling_year_early_daughter, daughterE$HHID))) 
+clseSYED[2]
+
+#late
+schooling_year_late_daughter <- lm(child_schooling ~ parent_schooling + child_age + PROVINCE + minority, data = daughterL)
+summary(schooling_year_late_daughter)
+clseSYLD <- sqrt(diag(cluster.vcov(schooling_year_late_daughter, daughterL$HHID))) 
+clseSYLD[2]
+
+# test for change in estimates
+t.test2(coef(schooling_year_late_daughter)[2],coef(schooling_year_early_daughter)[2],clseSYED[2], clseSYLD[2], length(daughterL),length(daughterE))
+
+
+# Son
+# early
+schooling_year_early_son <- lm(child_schooling ~ parent_schooling + child_age + PROVINCE + minority, data = sonE)
+summary(schooling_year_early_son)
+clseSYES <- sqrt(diag(cluster.vcov(schooling_year_early_son, sonE$HHID))) 
+clseSYES[2]
+
+#late
+schooling_year_late_son <- lm(child_schooling ~ parent_schooling + child_age + PROVINCE + minority, data = sonL)
+summary(schooling_year_late_son)
+clseSYLS <- sqrt(diag(cluster.vcov(schooling_year_late_son, sonL$HHID))) 
+clseSYLS[2]
+
+# test for change in estimates
+t.test2(coef(schooling_year_late_son)[2],coef(schooling_year_early_son)[2],clseSYES[2], clseSYLS[2], length(sonL),length(sonE))
+
+
+
+
+
+# Education Correlation (adjusting for different standard deviations between parent and child's schooling)
+# Intergenerational educational correlation = intergenerational education coefficient * sd(parent_schooling)/ sd (child_schooling)
+# sd for early cohort
+# all children
+sdPE <- sd(Early$parent_schooling, na.rm=TRUE)
+sdCE <- sd(Early$child_schooling, na.rm=TRUE)
+
+# daughter
+sdPED <- sd(daughterE$parent_schooling, na.rm=TRUE)
+sdCED <- sd(daughterE$child_schooling, na.rm=TRUE)
+
+# son
+sdPES <- sd(sonE$parent_schooling, na.rm=TRUE)
+sdCES <- sd(sonE$child_schooling, na.rm=TRUE)
+
+
+
+# sd for late cohort
+# all children
+sdPL <- sd(Late$parent_schooling, na.rm=TRUE)
+sdCL <- sd(Late$child_schooling, na.rm=TRUE)
+
+# daughter
+sdPLD <- sd(daughterL$parent_schooling, na.rm=TRUE)
+sdCLD <- sd(daughterL$child_schooling, na.rm=TRUE)
+
+# son
+sdPLS <- sd(sonL$parent_schooling, na.rm=TRUE)
+sdCLS <- sd(sonL$child_schooling, na.rm=TRUE)
+
+
+# Intergenerational Education Correlation
+# all children 
+# early
+coef(schooling_year_early)[2] * sdPE / sdCE
+clseSYE[2] * sdPE / sdCE
+
+# late
+coef(schooling_year_late)[2] * sdPL / sdCL
+clseSYL[2] * sdPL / sdCL
+
+# difference
+t.test2(coef(schooling_year_late)[2] * sdPL / sdCL, coef(schooling_year_early)[2] * sdPE / sdCE,clseSYL[2] * sdPL / sdCL, clseSYE[2] * sdPE / sdCE,length(Late),length(Early))
+
+
+#daughter
+#early
+coef(schooling_year_early_daughter)[2] * sdPED / sdCED
+clseSYED[2] * sdPED / sdCED
+
+#late
+coef(schooling_year_late_daughter)[2] * sdPLD / sdCLD
+clseSYLD[2] * sdPLD / sdCLD
+
+#difference
+t.test2(coef(schooling_year_late_daughter)[2] * sdPLD / sdCLD, coef(schooling_year_early_daughter)[2] * sdPED / sdCED,clseSYLD[2] * sdPLD / sdCLD, clseSYED[2] * sdPED / sdCED,length(daughterL),length(daughterE))
+
+
+#son
+#early
+coef(schooling_year_early_son)[2] * sdPES / sdCES
+clseSYES[2] * sdPES / sdCES
+
+#late
+coef(schooling_year_late_son)[2] * sdPLS / sdCLS
+clseSYLS[2] * sdPLS / sdCLS
+
+#difference
+t.test2(coef(schooling_year_late_son)[2] * sdPLS / sdCLS, coef(schooling_year_early_son)[2] * sdPES / sdCES,clseSYLS[2] * sdPLS / sdCLS, clseSYES[2] * sdPES / sdCES,length(sonL),length(sonE))
+
+
+# Rank to rank regression
+#All children
+rank_mother <- lm(ChildRank ~ MotherRank + child_female + child_age + PROVINCE + minority, data = mydata)
+summary(rank_mother)
+clseRM <- sqrt(diag(cluster.vcov(rank_mother, mydata$HHID))) 
+
+rank_father <- lm(ChildRank ~ FatherRank + child_female + child_age + PROVINCE + minority, data = mydata)
+summary(rank_father)
+clseRF <- sqrt(diag(cluster.vcov(rank_father, mydata$HHID))) 
+
+# daughter
+rank_mother_daughter <- lm(ChildRank ~ MotherRank + child_age + PROVINCE + minority, data = daughter)
+summary(rank_mother_daughter)
+clseRMD <- sqrt(diag(cluster.vcov(rank_mother_daughter, daughter$HHID))) 
+
+rank_father_daughter <- lm(ChildRank ~ FatherRank + child_age + PROVINCE + minority, data = daughter)
+summary(rank_father_daughter)
+clseRFD <- sqrt(diag(cluster.vcov(rank_father_daughter, daughter$HHID))) 
+
+# son
+rank_mother_son <- lm(ChildRank ~ MotherRank + child_age + PROVINCE + minority, data = son)
+summary(rank_mother_son)
+clseRMS <- sqrt(diag(cluster.vcov(rank_mother_son, son$HHID))) 
+
+rank_father_son <- lm(ChildRank ~ FatherRank + child_age + PROVINCE + minority, data = son)
+summary(rank_father_son)
+clseRFS <- sqrt(diag(cluster.vcov(rank_father_son, son$HHID))) 
+
+# output regression results
+stargazer(rank_mother, rank_father, se=list(clseRM,clseRF))
+stargazer(rank_mother_daughter, rank_father_daughter, se=list(clseRMD,clseRFD))
+stargazer(rank_mother_son, rank_father_son, se=list(clseRMS,clseRFS))
