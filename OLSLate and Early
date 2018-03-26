@@ -21,6 +21,7 @@ setwd("/Users/apple/Documents/LSE 3RD YEAR/EC331/data/MasterData")
 # load data
 mydata <- read.dta13("CHIP2002and1995.dta")
 
+
 # generate parent_schooling = average of mother and father schooling
 mydata$parent_schooling <- rowMeans(mydata[c('mother_schooling', 'father_schooling')], na.rm=TRUE)
 
@@ -69,7 +70,8 @@ t.test2 <- function(m1,m2,s1,s2,n1,n2,equal.variance=FALSE)
   return(dat) 
 }
 
-p <- function(mu,sd) {2*pt(-abs(mu/sd))}
+# p value
+p <- function(mu,sd,df) {2*pt(-abs(mu/sd),df)}
 
 # Level to level regression: Child schooling years on parent schooling years
 #All children
@@ -86,7 +88,7 @@ clseSYL <- sqrt(diag(cluster.vcov(schooling_year_late, Late$HHID)))
 clseSYL[2]
 
 # test for change in estimates
-t.test2(coef(schooling_year_late)[2],coef(schooling_year_early)[2],clseSYL[2], clseSYE[2],length(Late),length(Early))
+t.test2(coef(schooling_year_late)[2],coef(schooling_year_early)[2],clseSYL[2], clseSYE[2],nrow(Late),nrow(Early))
 
 
 
@@ -104,7 +106,7 @@ clseSYLD <- sqrt(diag(cluster.vcov(schooling_year_late_daughter, daughterL$HHID)
 clseSYLD[2]
 
 # test for change in estimates
-t.test2(coef(schooling_year_late_daughter)[2],coef(schooling_year_early_daughter)[2],clseSYED[2], clseSYLD[2], length(daughterL),length(daughterE))
+t.test2(coef(schooling_year_late_daughter)[2],coef(schooling_year_early_daughter)[2],clseSYED[2], clseSYLD[2], nrow(daughterL),nrow(daughterE))
 
 
 # Son
@@ -121,7 +123,7 @@ clseSYLS <- sqrt(diag(cluster.vcov(schooling_year_late_son, sonL$HHID)))
 clseSYLS[2]
 
 # test for change in estimates
-t.test2(coef(schooling_year_late_son)[2],coef(schooling_year_early_son)[2],clseSYES[2], clseSYLS[2], length(sonL),length(sonE))
+t.test2(coef(schooling_year_late_son)[2],coef(schooling_year_early_son)[2],clseSYES[2], clseSYLS[2], nrow(sonL),nrow(sonE))
 
 
 
@@ -163,13 +165,15 @@ sdCLS <- sd(sonL$child_schooling, na.rm=TRUE)
 # early
 coef(schooling_year_early)[2] * sdPE / sdCE
 clseSYE[2] * sdPE / sdCE
+p(coef(schooling_year_early)[2] * sdPE / sdCE, clseSYE[2] * sdPE / sdCE,nrow(Early))
 
 # late
 coef(schooling_year_late)[2] * sdPL / sdCL
 clseSYL[2] * sdPL / sdCL
+p(coef(schooling_year_late)[2] * sdPL / sdCL,clseSYL[2] * sdPL / sdCL,nrow(Late))
 
 # difference
-t.test2(coef(schooling_year_late)[2] * sdPL / sdCL, coef(schooling_year_early)[2] * sdPE / sdCE,clseSYL[2] * sdPL / sdCL, clseSYE[2] * sdPE / sdCE,length(Late),length(Early))
+t.test2(coef(schooling_year_late)[2] * sdPL / sdCL, coef(schooling_year_early)[2] * sdPE / sdCE,clseSYL[2] * sdPL / sdCL, clseSYE[2] * sdPE / sdCE,nrow(Late),nrow(Early))
 
 
 #daughter
@@ -182,7 +186,7 @@ coef(schooling_year_late_daughter)[2] * sdPLD / sdCLD
 clseSYLD[2] * sdPLD / sdCLD
 
 #difference
-t.test2(coef(schooling_year_late_daughter)[2] * sdPLD / sdCLD, coef(schooling_year_early_daughter)[2] * sdPED / sdCED,clseSYLD[2] * sdPLD / sdCLD, clseSYED[2] * sdPED / sdCED,length(daughterL),length(daughterE))
+t.test2(coef(schooling_year_late_daughter)[2] * sdPLD / sdCLD, coef(schooling_year_early_daughter)[2] * sdPED / sdCED,clseSYLD[2] * sdPLD / sdCLD, clseSYED[2] * sdPED / sdCED,nrow(daughterL),nrow(daughterE))
 
 
 #son
@@ -195,7 +199,7 @@ coef(schooling_year_late_son)[2] * sdPLS / sdCLS
 clseSYLS[2] * sdPLS / sdCLS
 
 #difference
-t.test2(coef(schooling_year_late_son)[2] * sdPLS / sdCLS, coef(schooling_year_early_son)[2] * sdPES / sdCES,clseSYLS[2] * sdPLS / sdCLS, clseSYES[2] * sdPES / sdCES,length(sonL),length(sonE))
+t.test2(coef(schooling_year_late_son)[2] * sdPLS / sdCLS, coef(schooling_year_early_son)[2] * sdPES / sdCES,clseSYLS[2] * sdPLS / sdCLS, clseSYES[2] * sdPES / sdCES,nrow(sonL),nrow(sonE))
 
 
 # Rank to rank regression
@@ -210,7 +214,7 @@ summary(rank_late)
 clseRL <- sqrt(diag(cluster.vcov(rank_late, Late$HHID))) 
 clseRL
 
-t.test2(coef(rank_late)[2],coef(rank_early)[2],clseRL[2], clseRE[2],length(Late),length(Early))
+t.test2(coef(rank_late)[2],coef(rank_early)[2],clseRL[2], clseRE[2],nrow(Late),nrow(Early))
 
 
 # Daughter
@@ -227,7 +231,7 @@ clseRLD <- sqrt(diag(cluster.vcov(rank_late_daughter, daughterL$HHID)))
 clseRLD[2]
 
 # test for change in estimates
-t.test2(coef(rank_late_daughter)[2],coef(rank_early_daughter)[2],clseRED[2], clseRLD[2], length(daughterL),length(daughterE))
+t.test2(coef(rank_late_daughter)[2],coef(rank_early_daughter)[2],clseRED[2], clseRLD[2], nrow(daughterL),nrow(daughterE))
 
 
 # Son
@@ -243,5 +247,10 @@ summary(rank_late_son)
 clseRLS <- sqrt(diag(cluster.vcov(rank_late_son, sonL$HHID))) 
 clseRLS[2]
 
-# test for change in estimates
-t.test2(coef(rank_late_son)[2],coef(rank_early_son)[2],clseRES[2], clseRLS[2], length(sonL),length(sonE))
+# test for change in estimates Late - Early
+t.test2(coef(rank_late_son)[2],coef(rank_early_son)[2],clseRES[2], clseRLS[2], nrow(sonL),nrow(sonE))
+
+# test for change in estimates Son - Daughter
+t.test2(coef(rank_early_son)[2],coef(rank_early_daughter)[2],clseRES[2], clseRED[2], nrow(sonE),nrow(daughterE))
+
+
