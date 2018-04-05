@@ -1,0 +1,202 @@
+# full sample diff in diff effect of reform
+# Load and install packages
+installation_needed  <- TRUE
+loading_needed <- TRUE
+package_list <- c('foreign', 'xtable', 'plm', 'AER','stargazer','readstata13',
+                  'arm', 'lmtest', 'sem', 'bdynsys', 'ivpack', 'mfx', 'glm2','plyr')
+if(installation_needed){install.packages(package_list, repos='http://cran.us.r-project.org')}
+if(loading_needed){lapply(package_list, require, character.only = TRUE)}
+
+library(sqldf)
+# set working directory (only works on my computer)
+# uncomment this before running the codes
+setwd("/Users/apple/Documents/LSE 3RD YEAR/EC331/data/MasterData")
+
+# clear the global workspace
+rm(list=ls())
+
+
+# load data
+mydata <- read.dta13("Raw Data.dta") 
+
+# select variables of interest
+mydata <- mydata[c("CITY","PCODE","CODE_P","P103","P104","P105","P106","P108","P112","P113","PROVINCE")]
+# rename variables 
+mydata <- rename(mydata, c("PCODE"="HHID","CODE_P"="INDID","P103"="relationship", "P104"="hukou", "P105"="female", "P106"="age", "P108"="minority", "P112"="educlevel","P113"="schooling"))
+
+# I restrict my data to age >= 22, so that most of them have completed university education
+mydata <- mydata[mydata$age >= 22,]
+mydata$birthyear <- 2002- mydata$age
+#mydata <- mydata[mydata$birthyear >= & mydata$birthyear <= 1954,]
+
+#load househod data
+background <- read.dta13("Household Data.dta")
+
+Self <- mydata[(mydata$relationship =="Self"),]
+Self <-sqldf("select Self.*, background.HF1 as GFage, background.HF3 as GFeduc, background.HF4 as GFparty, background.HF5 as GFoccupation, background.HF7 as GFchengfen, background.HM1 as GMage, background.HM3 as GMeduc, background.HM4 as GMparty, background.HM5 as GMoccupation, background.HM7 as GMchengfen from Self inner join background on Self.HHID = background.PCODE")
+
+Spouse <- mydata[(mydata$relationship =="Spouse"),]
+Spouse <-sqldf("select Spouse.*, background.SF1 as GFage, background.SF3 as GFeduc, background.SF4 as GFparty, background.SF5 as GFoccupation, background.SF7 as GFchengfen, background.SM1 as GMage, background.SM3 as GMeduc, background.SM4 as GMparty, background.SM5 as GMoccupation, background.SM7 as GMchengfen from Spouse inner join background on Spouse.HHID = background.PCODE")
+
+CHIP <- rbind(Self,Spouse)
+
+# create dummy for poor households
+CHIP$poor <- as.numeric(CHIP$GFchengfen == 1)
+
+
+# treated cohort: 1938-1954; controlled cohort: before 1938
+attach(CHIP)
+CHIP$treated[CHIP$birthyear>=1945 & CHIP$birthyear <= 1964] <- 1
+CHIP$treated[CHIP$birthyear<=1944] <- 0
+detach(CHIP)
+
+
+# create an interaction term for treated and poor
+CHIP$TreatedPoor <- CHIP$treated * CHIP$poor
+
+# check parallel trend
+poor <- CHIP[CHIP$GFchengfen == 1,]
+notpoor <- CHIP[CHIP$GFchengfen != 1,]
+
+# aggregate mean years of schooling for each birth year 
+aggrpoor <- aggregate(poor$schooling,by = list(poor$birthyear),mean,na.rm=TRUE)
+aggrpoor$type <- "poor peasants"
+
+aggrnotpoor <- aggregate(notpoor$schooling,by = list(notpoor$birthyear),mean,na.rm=TRUE)
+aggrnotpoor$type <- "lower middle and above"
+
+aggr <- rbind(aggrpoor,aggrnotpoor)
+
+# plot mean schooling years for the two groups
+plot <- ggplot(aggr, aes(Group.1,x,colour=type)) + xlim(1930,1970) + ylim(0,13) + xlab("birth year") + ylab("mean schooling years") + geom_line() 
+plot1 <- plot +  theme_bw() + geom_vline(xintercept=1944) + theme(legend.position = "bottom") + scale_color_manual(values=c("navyblue", "brown")) + theme(text=element_text(size=12)) +  theme(legend.text=element_text(size=12))
+plot1 
+
+
+#ggsave("parallel trend check full sample.pdf",plot1)
+
+# aggregate mean years of schooling for each birth year 
+aggrpoor <- aggregate(poor$educlevel,by = list(poor$birthyear),mean,na.rm=TRUE)
+aggrpoor$type <- "poor peasants"
+
+aggrnotpoor <- aggregate(notpoor$educlevel,by = list(notpoor$birthyear),mean,na.rm=TRUE)
+aggrnotpoor$type <- "lower middle and above"
+
+aggr <- rbind(aggrpoor,aggrnotpoor)
+
+# plot mean schooling years for the two groups
+plot2 <- ggplot(aggr, aes(Group.1,x,colour=type)) + xlim(1925,1960) + ylim(0,7) + xlab("birth year") + ylab("mean schooling years") + geom_line() 
+plot3 <- plot2 +  theme_bw() +  geom_vline(xintercept=1938)  + theme(legend.position = "bottom") + scale_color_manual(values=c("navyblue", "brown")) + theme(text=element_text(size=12)) +  theme(legend.text=element_text(size=12))
+plot3 
+
+# no controls
+no_controls <- lm(schooling ~ poor + treated + TreatedPoor, data = CHIP)
+summary(no_controls,vcov=sandwich)
+
+# some controls
+some_controls <- lm(schooling ~ poor + treated + TreatedPoor + PROVINCE , data = CHIP)
+summary(some_controls,vcov=sandwich)
+
+# all controls
+all_controls <- lm(schooling ~ poor + treated + TreatedPoor + PROVINCE + GFeduc + GFage , data = CHIP)
+summary(all_controls,vcov=sandwich)
+
+
+#subset CHIP
+CHIP <- backup
+CHIP <- CHIP[CHIP$birthyear >= 1930 &CHIP$birthyear<=1953,]
+#generate age dummies
+#CHIP$age24 <- as.numeric(CHIP$birthyear == 1926)
+#CHIP$age23 <- as.numeric(CHIP$birthyear == 1927)
+#CHIP$age22 <- as.numeric(CHIP$birthyear == 1928)
+#CHIP$age21 <- as.numeric(CHIP$birthyear == 1929)
+#CHIP$age20 <- as.numeric(CHIP$birthyear == 1930)
+CHIP$age19 <- as.numeric(CHIP$birthyear == 1931)
+CHIP$age18 <- as.numeric(CHIP$birthyear == 1932)
+CHIP$age17 <- as.numeric(CHIP$birthyear == 1933)
+CHIP$age16 <- as.numeric(CHIP$birthyear == 1934)
+CHIP$age15 <- as.numeric(CHIP$birthyear == 1935)
+CHIP$age14 <- as.numeric(CHIP$birthyear == 1936)
+CHIP$age13 <- as.numeric(CHIP$birthyear == 1937)
+CHIP$age12 <- as.numeric(CHIP$birthyear == 1938)
+CHIP$age11 <- as.numeric(CHIP$birthyear == 1939)
+CHIP$age10 <- as.numeric(CHIP$birthyear == 1940)
+CHIP$age9 <- as.numeric(CHIP$birthyear == 1941)
+CHIP$age8 <- as.numeric(CHIP$birthyear == 1942)
+CHIP$age7 <- as.numeric(CHIP$birthyear == 1943)
+CHIP$age6 <- as.numeric(CHIP$birthyear == 1944)
+CHIP$age5 <- as.numeric(CHIP$birthyear == 1945)
+CHIP$age4 <- as.numeric(CHIP$birthyear == 1946)
+CHIP$age3 <- as.numeric(CHIP$birthyear == 1947)
+CHIP$age2 <- as.numeric(CHIP$birthyear == 1948)
+CHIP$age1 <- as.numeric(CHIP$birthyear == 1949)
+CHIP$age0 <- as.numeric(CHIP$birthyear == 1950)
+CHIP$Year1951 <- as.numeric(CHIP$birthyear == 1951)
+CHIP$Year1952 <- as.numeric(CHIP$birthyear == 1952)
+CHIP$Year1953 <- as.numeric(CHIP$birthyear == 1953)
+CHIP$Year1954 <- as.numeric(CHIP$birthyear == 1954)
+CHIP$Year1955 <- as.numeric(CHIP$birthyear == 1955)
+CHIP$Year1956 <- as.numeric(CHIP$birthyear == 1956)
+CHIP$Year1957 <- as.numeric(CHIP$birthyear == 1957)
+
+#generate age * poor
+CHIP$age19Poor <- CHIP$age19 * CHIP$poor
+CHIP$age18Poor <- CHIP$age18 * CHIP$poor
+CHIP$age17Poor <- CHIP$age17 * CHIP$poor
+CHIP$age16Poor <- CHIP$age16 * CHIP$poor
+CHIP$age15Poor <- CHIP$age15 * CHIP$poor
+CHIP$age14Poor <- CHIP$age14 * CHIP$poor
+CHIP$age13Poor <- CHIP$age13 * CHIP$poor
+CHIP$age12Poor <- CHIP$age12 * CHIP$poor
+CHIP$age11Poor <- CHIP$age11 * CHIP$poor
+CHIP$age10Poor <- CHIP$age10 * CHIP$poor
+CHIP$age9Poor <- CHIP$age9 * CHIP$poor
+CHIP$age8Poor <- CHIP$age8 * CHIP$poor
+CHIP$age7Poor <- CHIP$age7 * CHIP$poor
+CHIP$age6Poor <- CHIP$age6 * CHIP$poor
+CHIP$age5Poor <- CHIP$age5 * CHIP$poor
+CHIP$age4Poor <- CHIP$age4 * CHIP$poor
+CHIP$age3Poor <- CHIP$age3 * CHIP$poor
+CHIP$age2Poor <- CHIP$age2 * CHIP$poor
+CHIP$age1Poor <- CHIP$age1 * CHIP$poor
+CHIP$age0Poor <- CHIP$age0 * CHIP$poor
+CHIP$Year1951Poor <- CHIP$Year1951 * CHIP$poor
+CHIP$Year1952Poor <- CHIP$Year1952 * CHIP$poor
+CHIP$Year1953Poor <- CHIP$Year1953 * CHIP$poor
+CHIP$Year1954Poor <- CHIP$Year1954 * CHIP$poor
+CHIP$Year1955Poor <- CHIP$Year1955 * CHIP$poor
+CHIP$Year1956Poor <- CHIP$Year1956 * CHIP$poor
+CHIP$Year1957Poor <- CHIP$Year1957 * CHIP$poor
+
+# diff in diff with age dummies
+age_dummies_diff_in_diff <- lm(schooling ~ PROVINCE + poor + age0 + age1 + age2 + age3 + age4 + age5 + age6 + age7 + age8 + age9 + age10 + age11 + age12 + age13 + age14 + age15 + age16 + age17 + age18 + age19 +
+                                 Year1951 + Year1952 + Year1953 + Year1954 + Year1955 + Year1956 + Year1957 + 
+                                 age0Poor + age1Poor + age2Poor + age3Poor + age4Poor + age5Poor + age6Poor + age7Poor + age8Poor + age9Poor + age10Poor + age11Poor + age12Poor + age13Poor + age14Poor + age15Poor + age16Poor + 
+                               age17Poor + age18Poor + age19Poor + Year1951Poor + Year1952Poor + Year1953Poor + Year1954Poor + Year1955Poor + Year1956Poor + Year1957Poor, data=CHIP)
+
+summary(age_dummies_diff_in_diff)
+
+
+# diff in diff with age dummies
+age_dummies_diff_in_diff <- lm(schooling ~ PROVINCE + poor + age0 + age1 + age2 + age3 + age4 + age5 + age6 + age7 + age8 + age9 + age10 + age11 + age12 + age13 + age14 + age15 + age16 +Year1951 + Year1952 + Year1953
+                              
+                                + age0Poor + age1Poor + age2Poor + age3Poor + age4Poor + age5Poor + age6Poor + age7Poor + age8Poor + age9Poor + age10Poor + age11Poor + age12Poor + age13Poor + age14Poor + age15Poor + age16Poor + Year1951Poor + Year1952Poor + Year1953Poor, data=CHIP)
+
+summary(age_dummies_diff_in_diff)
+
+
+
+
+# 2 x 2 table of difference in difference
+TreatedPoor <- CHIP[CHIP$treated==1&CHIP$poor==1,]
+mean(TreatedPoor$schooling,na.rm=TRUE)
+
+TreatedNonPoor <- CHIP[CHIP$treated==1&CHIP$poor==0,]
+mean(TreatedNonPoor$schooling,na.rm=TRUE)
+
+ControlledPoor <- CHIP[CHIP$treated==0&CHIP$poor==1,]
+mean(ControlledPoor$schooling,na.rm=TRUE)
+
+ControlledNonPoor <- CHIP[CHIP$treated==0&CHIP$poor==0,]
+mean(ControlledNonPoor$schooling,na.rm=TRUE)
+
