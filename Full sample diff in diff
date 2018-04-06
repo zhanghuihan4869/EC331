@@ -26,7 +26,6 @@ mydata <- rename(mydata, c("PCODE"="HHID","CODE_P"="INDID","P103"="relationship"
 
 # I restrict my data to age >= 22, so that most of them have completed university education
 mydata<-na.omit(mydata)
-mydata <- mydata[mydata$age >= 22,]
 mydata$birthyear <- 2002- mydata$age
 #mydata <- mydata[mydata$birthyear >= & mydata$birthyear <= 1954,]
 
@@ -34,10 +33,10 @@ mydata$birthyear <- 2002- mydata$age
 background <- read.dta13("Household Data.dta")
 
 Self <- mydata[(mydata$relationship =="Self"),]
-Self <-sqldf("select Self.*, background.HF1 as GFage, background.HF3 as GFeduc, background.HF4 as GFparty, background.HF5 as GFoccupation, background.HF7 as GFchengfen, background.HM1 as GMage, background.HM3 as GMeduc, background.HM4 as GMparty, background.HM5 as GMoccupation, background.HM7 as GMchengfen from Self inner join background on Self.HHID = background.PCODE")
+Self <-sqldf("select Self.*, background.HF1 as GFage, background.HF3 as GFeduc, background.HF4 as GFparty, background.HF7 as GFchengfen from Self inner join background on Self.HHID = background.PCODE")
 
 Spouse <- mydata[(mydata$relationship =="Spouse"),]
-Spouse <-sqldf("select Spouse.*, background.SF1 as GFage, background.SF3 as GFeduc, background.SF4 as GFparty, background.SF5 as GFoccupation, background.SF7 as GFchengfen, background.SM1 as GMage, background.SM3 as GMeduc, background.SM4 as GMparty, background.SM5 as GMoccupation, background.SM7 as GMchengfen from Spouse inner join background on Spouse.HHID = background.PCODE")
+Spouse <-sqldf("select Spouse.*, background.SF1 as GFage, background.SF3 as GFeduc, background.SF4 as GFparty, background.SF7 as GFchengfen from Spouse inner join background on Spouse.HHID = background.PCODE")
 
 CHIP <- rbind(Self,Spouse)
 CHIP <- CHIP[CHIP$birthyear >= 1930 & CHIP$birthyear <= 1960,]
@@ -62,6 +61,20 @@ CHIP$PROVINCE <- as.factor(CHIP$PROVINCE)
 CHIP$age <- as.factor(CHIP$age)
 
 
+#load my sample of CHIP2002
+CHIP2002 <- read.dta13("CHIP2002AllChildren.dta")
+
+# subset for age over 6
+CHIP2002 <- CHIP2002[CHIP2002$child_age>=6,]
+CHIP2002 <- na.omit(CHIP2002)
+# subsample for parents with children
+subsample <- sqldf("select CHIP.*, CHIP2002.child_ID, CHIP2002.child_schooling, CHIP2002.child_female, CHIP2002.child_age from CHIP inner join CHIP2002 on CHIP.HHID=CHIP2002.HHID")
+subsample <- rename(subsample, c("birthyear"="parent_birthyear","schooling"="parent_schooling","age"="parent_age","female"="parent_female","INDID"="parent_ID"))
+# drop the clearly wrongly measured case (only one such case) when child's age is greater than parent's age.
+subsample[subsample$child_age == 74,] <- NA
+subsample <- na.omit(subsample)
+subsample$child_birthyear <- 2002-subsample$child_age
+write.dta(subsample,"SubsampleWithChildren.dta")
 
 # check parallel trend
 poor <- CHIP[CHIP$GFchengfen == 1,]
@@ -82,13 +95,16 @@ plot1 <- plot +  theme_bw() + geom_vline(xintercept=1944)  + theme(legend.positi
 plot1 
 ggsave("parallel trend check full sample.pdf",plot1)
 
+######Subsample
+# 
 
-
-
+######Full sample
 # no controls
 
 no_controls <- lm(schooling ~ poor + treated + TreatedPoor, data = CHIP)
 summary(no_controls,vcov=sandwich)
+
+
 
 no_controls <- lm(schooling ~ GFchengfen + age + TreatedPoor, data = CHIP)
 summary(no_controls,vcov=sandwich)
@@ -204,17 +220,18 @@ summary(age_dummies_diff_in_diff)
 
 
 # 2 x 2 table of difference in difference
-TreatedPoor <- CHIP[CHIP$treated==1&CHIP$poor==1,]
-mean(TreatedPoor$schooling,na.rm=TRUE)
+cell11 <- lm(schooling ~ poor + treated + TreatedPoor, data = subset(CHIP,poor==1&treated==1))
+summary(cell11,vcov=sandwich)
 
-TreatedNonPoor <- CHIP[CHIP$treated==1&CHIP$poor==0,]
-mean(TreatedNonPoor$schooling,na.rm=TRUE)
+cell12 <- lm(schooling ~ poor + treated + TreatedPoor, data = subset(CHIP,poor==0&treated==1))
+summary(cell12,vcov=sandwich)
 
-ControlledPoor <- CHIP[CHIP$treated==0&CHIP$poor==1,]
-mean(ControlledPoor$schooling,na.rm=TRUE)
+cell21 <- lm(schooling ~ poor + treated + TreatedPoor, data = subset(CHIP,poor==1&treated==0))
+summary(cell21,vcov=sandwich)
 
-ControlledNonPoor <- CHIP[CHIP$treated==0&CHIP$poor==0,]
-mean(ControlledNonPoor$schooling,na.rm=TRUE)
+cell22 <- lm(schooling ~ poor + treated + TreatedPoor, data = subset(CHIP,poor==0&treated==0))
+summary(cell22,vcov=sandwich)
+
 
 
 
