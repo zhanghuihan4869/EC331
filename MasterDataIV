@@ -1,0 +1,82 @@
+# Output data full sample and subsample
+# Load and install packages
+installation_needed  <- TRUE
+loading_needed <- TRUE
+package_list <- c('foreign', 'xtable', 'plm', 'AER','stargazer','readstata13',
+                  'arm', 'lmtest', 'sem', 'bdynsys', 'ivpack', 'mfx', 'glm2','plyr')
+if(installation_needed){install.packages(package_list, repos='http://cran.us.r-project.org')}
+if(loading_needed){lapply(package_list, require, character.only = TRUE)}
+
+library(sqldf)
+# set working directory (only works on my computer)
+# uncomment this before running the codes
+setwd("/Users/apple/Documents/LSE 3RD YEAR/EC331/data/MasterData")
+
+# clear the global workspace
+rm(list=ls())
+
+# full sample
+# load data
+mydata <- read.dta13("Raw Data.dta") 
+
+# select variables of interest
+mydata <- mydata[c("CITY","PCODE","CODE_P","P103","P104","P105","P106","P108","P112","P113","PROVINCE")]
+# rename variables 
+mydata <- rename(mydata, c("PCODE"="HHID","CODE_P"="INDID","P103"="relationship", "P104"="hukou", "P105"="female", "P106"="age", "P108"="minority", "P112"="educlevel","P113"="schooling"))
+
+# I restrict my data to age >= 22, so that most of them have completed university education
+mydata<-na.omit(mydata)
+mydata <- mydata[mydata$age >= 22,]
+mydata$birthyear <- 2002- mydata$age
+#mydata <- mydata[mydata$birthyear >= & mydata$birthyear <= 1954,]
+
+#load househod data
+background <- read.dta13("Household Data.dta")
+
+Self <- mydata[(mydata$relationship =="Self"),]
+Self <-sqldf("select Self.*, background.HF1 as GFage, background.HF3 as GFeduc, background.HF4 as GFparty, background.HF7 as GFchengfen from Self inner join background on Self.HHID = background.PCODE")
+
+Spouse <- mydata[(mydata$relationship =="Spouse"),]
+Spouse <-sqldf("select Spouse.*, background.SF1 as GFage, background.SF3 as GFeduc, background.SF4 as GFparty, background.SF7 as GFchengfen from Spouse inner join background on Spouse.HHID = background.PCODE")
+
+CHIP <- rbind(Self,Spouse)
+CHIP <- CHIP[CHIP$birthyear >= 1930 & CHIP$birthyear <= 1960,]
+CHIP <- na.omit(CHIP)
+
+# create dummy for poor households
+CHIP[CHIP$GFchengfen == 0,] <- NA
+CHIP <- na.omit(CHIP)
+table(CHIP$GFchengfen)
+CHIP$GFchengfen <- as.factor(CHIP$GFchengfen)
+CHIP$poor <- as.numeric(CHIP$GFchengfen == 1)
+
+# treated cohort: 1938-1954; controlled cohort: before 1938
+attach(CHIP)
+CHIP$treated[CHIP$birthyear>=1944 & CHIP$birthyear <= 1960] <- 1
+CHIP$treated[CHIP$birthyear>=1930 & CHIP$birthyear <= 1943] <- 0
+detach(CHIP)
+
+# create an interaction term for treated and poor
+CHIP$TreatedPoor <- CHIP$treated * CHIP$poor
+CHIP$PROVINCE <- as.factor(CHIP$PROVINCE)
+CHIP$age <- as.factor(CHIP$age)
+
+write.dta(CHIP,"fullsample.dta")
+
+
+
+# subsample
+#load my sample of CHIP2002 with children's informaiton
+CHIP2002 <- read.dta13("CHIP2002AllChildren.dta")
+
+# subset for age over 6
+CHIP2002 <- CHIP2002[CHIP2002$child_age>=6,]
+CHIP2002 <- na.omit(CHIP2002)
+# subsample for parents with children
+subsample <- sqldf("select CHIP.*, CHIP2002.child_ID, CHIP2002.child_schooling, CHIP2002.child_female, CHIP2002.child_age from CHIP inner join CHIP2002 on CHIP.HHID=CHIP2002.HHID")
+subsample <- rename(subsample, c("birthyear"="parent_birthyear","schooling"="parent_schooling","age"="parent_age","female"="parent_female","INDID"="parent_ID"))
+# drop the clearly wrongly measured case (only one such case) when child's age is greater than parent's age.
+subsample[subsample$child_age == 74,] <- NA
+subsample <- na.omit(subsample)
+
+#write.dta(subsample,"SubsampleWithChildren.dta")
