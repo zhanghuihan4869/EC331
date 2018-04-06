@@ -25,6 +25,7 @@ mydata <- mydata[c("CITY","PCODE","CODE_P","P103","P104","P105","P106","P108","P
 mydata <- rename(mydata, c("PCODE"="HHID","CODE_P"="INDID","P103"="relationship", "P104"="hukou", "P105"="female", "P106"="age", "P108"="minority", "P112"="educlevel","P113"="schooling"))
 
 # I restrict my data to age >= 22, so that most of them have completed university education
+mydata<-na.omit(mydata)
 mydata <- mydata[mydata$age >= 22,]
 mydata$birthyear <- 2002- mydata$age
 #mydata <- mydata[mydata$birthyear >= & mydata$birthyear <= 1954,]
@@ -39,20 +40,28 @@ Spouse <- mydata[(mydata$relationship =="Spouse"),]
 Spouse <-sqldf("select Spouse.*, background.SF1 as GFage, background.SF3 as GFeduc, background.SF4 as GFparty, background.SF5 as GFoccupation, background.SF7 as GFchengfen, background.SM1 as GMage, background.SM3 as GMeduc, background.SM4 as GMparty, background.SM5 as GMoccupation, background.SM7 as GMchengfen from Spouse inner join background on Spouse.HHID = background.PCODE")
 
 CHIP <- rbind(Self,Spouse)
+CHIP <- CHIP[CHIP$birthyear >= 1930 & CHIP$birthyear <= 1960,]
+CHIP <- na.omit(CHIP)
 
 # create dummy for poor households
+CHIP[CHIP$GFchengfen == 0,] <- NA
+CHIP <- na.omit(CHIP)
+table(CHIP$GFchengfen)
+CHIP$GFchengfen <- as.factor(CHIP$GFchengfen)
 CHIP$poor <- as.numeric(CHIP$GFchengfen == 1)
-
 
 # treated cohort: 1938-1954; controlled cohort: before 1938
 attach(CHIP)
-CHIP$treated[CHIP$birthyear>=1945 & CHIP$birthyear <= 1964] <- 1
-CHIP$treated[CHIP$birthyear<=1944] <- 0
+CHIP$treated[CHIP$birthyear>=1944 & CHIP$birthyear <= 1960] <- 1
+CHIP$treated[CHIP$birthyear>=1930 & CHIP$birthyear <= 1943] <- 0
 detach(CHIP)
-
 
 # create an interaction term for treated and poor
 CHIP$TreatedPoor <- CHIP$treated * CHIP$poor
+CHIP$PROVINCE <- as.factor(CHIP$PROVINCE)
+CHIP$age <- as.factor(CHIP$age)
+
+
 
 # check parallel trend
 poor <- CHIP[CHIP$GFchengfen == 1,]
@@ -68,38 +77,45 @@ aggrnotpoor$type <- "lower middle and above"
 aggr <- rbind(aggrpoor,aggrnotpoor)
 
 # plot mean schooling years for the two groups
-plot <- ggplot(aggr, aes(Group.1,x,colour=type)) + xlim(1930,1970) + ylim(0,13) + xlab("birth year") + ylab("mean schooling years") + geom_line() 
-plot1 <- plot +  theme_bw() + geom_vline(xintercept=1944) + theme(legend.position = "bottom") + scale_color_manual(values=c("navyblue", "brown")) + theme(text=element_text(size=12)) +  theme(legend.text=element_text(size=12))
+plot <- ggplot(aggr, aes(Group.1,x,colour=type)) + xlim(1930,1960) + ylim(0,13) + xlab("birth year") + ylab("mean schooling years") + geom_line() 
+plot1 <- plot +  theme_bw() + geom_vline(xintercept=1944)  + theme(legend.position = "bottom") + scale_color_manual(values=c("navyblue", "brown")) + theme(text=element_text(size=12)) +  theme(legend.text=element_text(size=12))
 plot1 
+ggsave("parallel trend check full sample.pdf",plot1)
 
 
-#ggsave("parallel trend check full sample.pdf",plot1)
 
-# aggregate mean years of schooling for each birth year 
-aggrpoor <- aggregate(poor$educlevel,by = list(poor$birthyear),mean,na.rm=TRUE)
-aggrpoor$type <- "poor peasants"
-
-aggrnotpoor <- aggregate(notpoor$educlevel,by = list(notpoor$birthyear),mean,na.rm=TRUE)
-aggrnotpoor$type <- "lower middle and above"
-
-aggr <- rbind(aggrpoor,aggrnotpoor)
-
-# plot mean schooling years for the two groups
-plot2 <- ggplot(aggr, aes(Group.1,x,colour=type)) + xlim(1925,1960) + ylim(0,7) + xlab("birth year") + ylab("mean schooling years") + geom_line() 
-plot3 <- plot2 +  theme_bw() +  geom_vline(xintercept=1938)  + theme(legend.position = "bottom") + scale_color_manual(values=c("navyblue", "brown")) + theme(text=element_text(size=12)) +  theme(legend.text=element_text(size=12))
-plot3 
 
 # no controls
+
 no_controls <- lm(schooling ~ poor + treated + TreatedPoor, data = CHIP)
 summary(no_controls,vcov=sandwich)
 
-# some controls
+no_controls <- lm(schooling ~ GFchengfen + age + TreatedPoor, data = CHIP)
+summary(no_controls,vcov=sandwich)
+
+no_controls <- lm(schooling ~ poor + age + TreatedPoor, data = CHIP)
+summary(no_controls,vcov=sandwich)
+
+no_controls <- lm(schooling ~ GFchengfen + age + TreatedPoor + female, data = CHIP)
+summary(no_controls,vcov=sandwich)
+
+# province fixed effect
 some_controls <- lm(schooling ~ poor + treated + TreatedPoor + PROVINCE , data = CHIP)
 summary(some_controls,vcov=sandwich)
 
+some_controls <- lm(schooling ~ poor + age + TreatedPoor + PROVINCE, data = CHIP)
+summary(some_controls,vcov=sandwich)
+
 # all controls
-all_controls <- lm(schooling ~ poor + treated + TreatedPoor + PROVINCE + GFeduc + GFage , data = CHIP)
+all_controls <- lm(schooling ~ poor + treated + TreatedPoor + PROVINCE + GFage + GFeduc  , data = CHIP)
 summary(all_controls,vcov=sandwich)
+
+all_controls <- lm(schooling ~ GFchengfen + age + TreatedPoor + PROVINCE + GFage + GFeduc , data = CHIP)
+summary(all_controls,vcov=sandwich)
+
+
+
+
 
 
 #subset CHIP
@@ -199,4 +215,24 @@ mean(ControlledPoor$schooling,na.rm=TRUE)
 
 ControlledNonPoor <- CHIP[CHIP$treated==0&CHIP$poor==0,]
 mean(ControlledNonPoor$schooling,na.rm=TRUE)
+
+
+
+
+
+# plot mean educ level
+# aggregate mean years of schooling for each birth year 
+aggrpoor <- aggregate(poor$educlevel,by = list(poor$birthyear),mean,na.rm=TRUE)
+aggrpoor$type <- "poor peasants"
+
+aggrnotpoor <- aggregate(notpoor$educlevel,by = list(notpoor$birthyear),mean,na.rm=TRUE)
+aggrnotpoor$type <- "lower middle and above"
+
+aggr <- rbind(aggrpoor,aggrnotpoor)
+
+# plot mean schooling years for the two groups
+plot2 <- ggplot(aggr, aes(Group.1,x,colour=type)) + xlim(1930,1960) + ylim(0,7) + xlab("birth year") + ylab("mean schooling years") + geom_line() 
+plot3 <- plot2 +  theme_bw() +  geom_vline(xintercept=1944)  + theme(legend.position = "bottom") + scale_color_manual(values=c("navyblue", "brown")) + theme(text=element_text(size=12)) +  theme(legend.text=element_text(size=12))
+plot3 
+
 
