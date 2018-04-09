@@ -1,0 +1,870 @@
+# IV
+# full sample + with child_age >= 15 + with child_age >= 22
+
+# load packages
+# Load and install packages
+installation_needed  <- TRUE
+loading_needed <- TRUE
+package_list <- c('foreign', 'ggplot2', 'car', 'AER','sandwich','stargazer','readstata13',
+                  'ivmodel', 'lmtest', 'sem', 'bdynsys', 'ivpack', 'sqldf', 'glm2','plyr')
+if(installation_needed){install.packages(package_list, repos='http://cran.us.r-project.org')}
+if(loading_needed){lapply(package_list, require, character.only = TRUE)}
+
+
+
+# set working directory (only works on my computer)
+# uncomment this before running the codes
+setwd("/Users/apple/Documents/LSE 3RD YEAR/EC331/data/MasterData")
+
+# clear the global workspace
+rm(list=ls())
+
+
+# load data
+mydata <- read.dta13("Raw Data.dta") 
+
+# select variables of interest
+mydata <- mydata[c("CITY","PCODE","CODE_P","P103","P104","P105","P106","P108","P112","P113","PROVINCE","P127")]
+# rename variables 
+mydata <- rename(mydata, c("PCODE"="HHID","CODE_P"="INDID","P103"="relationship", "P104"="hukou", "P105"="female", "P106"="age", "P108"="minority", "P112"="educlevel","P113"="schooling","P127"="rustication"))
+mydata<-na.omit(mydata)
+
+#load househod data for grandfather's information
+background <- read.dta13("Household Data.dta")
+
+# match grandfather with household heads
+Self <- mydata[(mydata$relationship =="Self"),]
+Self <-sqldf("select Self.*, background.HF1 as GFage, background.HF3 as GFeduc, background.HF4 as GFparty, background.HF7 as GFchengfen from Self inner join background on Self.HHID = background.PCODE")
+
+# match grandfather with household spouses
+Spouse <- mydata[(mydata$relationship =="Spouse"),]
+Spouse <-sqldf("select Spouse.*, background.SF1 as GFage, background.SF3 as GFeduc, background.SF4 as GFparty, background.SF7 as GFchengfen from Spouse inner join background on Spouse.HHID = background.PCODE")
+
+# combine to form parents dataset
+CHIP <- rbind(Self,Spouse)
+
+# subset parents born between 1930 and 1960
+CHIP$birthyear <- 2002- CHIP$age
+CHIP <- CHIP[CHIP$birthyear >= 1930 & CHIP$birthyear <= 1960,]
+CHIP <- na.omit(CHIP)
+
+# reformat variables 
+# consider female and rustication as numeric variables
+CHIP$female <- as.numeric(CHIP$female == "female")
+CHIP$rustication <- as.numeric(CHIP$rustication==1)
+
+#consider province and age dummies as factor variables 
+CHIP$PROVINCE <- as.factor(CHIP$PROVINCE)
+CHIP$age <- as.factor(CHIP$age)
+
+# create dummy for poor households
+# drop missing chengfen (denoted as 0 in the raw dataset)
+CHIP[CHIP$GFchengfen == 0,] <- NA
+CHIP <- na.omit(CHIP)
+CHIP$poor <- as.numeric(CHIP$GFchengfen == 1)
+
+# define treated cohort: 1938-1954; controlled cohort: before 1938
+attach(CHIP)
+CHIP$treated[CHIP$birthyear>=1944 & CHIP$birthyear <= 1960] <- 1
+CHIP$treated[CHIP$birthyear>=1930 & CHIP$birthyear <= 1943] <- 0
+detach(CHIP)
+
+# create an interaction term for treated and poor
+CHIP$TreatedPoor <- CHIP$treated * CHIP$poor
+
+
+
+########################## Full sample ##################################
+
+
+# check parallel trend
+poor <- CHIP[CHIP$GFchengfen == 1,]
+notpoor <- CHIP[CHIP$GFchengfen != 1,]
+
+# aggregate mean years of schooling for each birth year 
+aggrpoor <- aggregate(poor$schooling,by = list(poor$birthyear),mean,na.rm=TRUE)
+aggrpoor$type <- "poor peasants"
+
+aggrnotpoor <- aggregate(notpoor$schooling,by = list(notpoor$birthyear),mean,na.rm=TRUE)
+aggrnotpoor$type <- "lower middle and above"
+
+aggr <- rbind(aggrpoor,aggrnotpoor)
+
+# plot mean schooling years for the two groups
+plot <- ggplot(aggr, aes(Group.1,x,colour=type)) + xlim(1930,1960) + ylim(5,13) + xlab("birth year") + ylab("mean schooling years") + geom_line() 
+plot1 <- plot +  theme_bw() + geom_vline(xintercept=1943)  + theme(legend.position = "bottom") + scale_color_manual(values=c("navyblue", "brown")) + theme(text=element_text(size=12)) +  theme(legend.text=element_text(size=12))
+plot1 
+#ggsave("parallel trend check full sample.pdf",plot1)
+
+# 2 x 2 table of difference in difference matrix 
+DID <- lm(schooling ~ poor + treated + TreatedPoor, data = CHIP)
+summary(DID,vcov=sandwich)
+
+cell11 <- lm(schooling ~ poor + treated + TreatedPoor, data = subset(CHIP,poor==1&treated==1))
+summary(cell11,vcov=sandwich)
+
+cell12 <- lm(schooling ~ poor + treated + TreatedPoor, data = subset(CHIP,poor==0&treated==1))
+summary(cell12,vcov=sandwich)
+
+cell21 <- lm(schooling ~ poor + treated + TreatedPoor, data = subset(CHIP,poor==1&treated==0))
+summary(cell21,vcov=sandwich)
+
+cell22 <- lm(schooling ~ poor + treated + TreatedPoor, data = subset(CHIP,poor==0&treated==0))
+summary(cell22,vcov=sandwich)
+
+# Full sample
+# All
+# no controls(only province and birth year dummies)
+no_controls <- lm(schooling ~ treated + poor + age + TreatedPoor + PROVINCE + female, data = CHIP)
+summary(no_controls,vcov=sandwich)
+
+# with controls
+with_controls <- lm(schooling ~ treated + poor + age + TreatedPoor + PROVINCE + female + GFage + GFeduc + age + female, data = CHIP)
+summary(with_controls,vcov=sandwich)
+
+# with controls and rustication
+with_controls <- lm(schooling ~ treated + poor + age + TreatedPoor + PROVINCE + female + GFage + GFeduc + rustication + rustication*poor, data = CHIP)
+summary(with_controls,vcov=sandwich)
+
+
+# Mother
+# no controls(only province and birth year dummies)
+no_controls_f <- lm(schooling ~ treated + poor + age + TreatedPoor + PROVINCE, data = subset(CHIP,female==1))
+summary(no_controls_f,vcov=sandwich)
+
+# with controls
+with_controls_f <- lm(schooling ~ treated + poor + age + TreatedPoor + PROVINCE + GFage + GFeduc + age + female , data =  subset(CHIP,female==1))
+summary(with_controls_f,vcov=sandwich)
+
+# with controls and rustication
+with_controls_f <- lm(schooling ~ treated + poor + age + TreatedPoor + PROVINCE + GFage + GFeduc + age + female  + rustication + rustication*poor, data = subset(CHIP,female==1))
+summary(with_controls_f,vcov=sandwich)
+
+# Father
+# no controls(only province and birth year dummies)
+no_controls_m <- lm(schooling ~ treated + poor + age + TreatedPoor + PROVINCE, data = subset(CHIP,female==0))
+summary(no_controls_m,vcov=sandwich)
+# with controls
+with_controls_m <- lm(schooling ~ treated + poor + age + TreatedPoor + PROVINCE + female + age + female + GFage + GFeduc , data = subset(CHIP,female==0))
+summary(with_controls_m,vcov=sandwich)
+
+# with controls and rustication
+with_controls_m <- lm(schooling ~ treated + poor + age + TreatedPoor + PROVINCE + GFage + GFeduc + age + female +  GFage + GFeduc + rustication + rustication*poor, data = subset(CHIP,female==0))
+summary(with_controls_m,vcov=sandwich)
+
+
+
+########################## construct subsample data set ##################################
+
+#load my formatted sample CHIP2002
+CHIP2002 <- read.dta13("CHIP2002AllChildren.dta")
+CHIP2002 <- na.omit(CHIP2002)
+
+# match children data to parents
+subsample <- sqldf("select CHIP.*, CHIP2002.child_ID, CHIP2002.child_schooling, CHIP2002.child_female, CHIP2002.child_age from CHIP inner join CHIP2002 on CHIP.HHID=CHIP2002.HHID")
+subsample <- rename(subsample, c("birthyear"="parent_birthyear","schooling"="parent_schooling","age"="parent_age","female"="parent_female","INDID"="parent_ID"))
+# drop the clearly wrongly measured case (only one such case) when child's age is greater than parent's age.
+subsample[subsample$child_age == 74,] <- NA
+subsample <- na.omit(subsample)
+subsample$child_birthyear <- 2002-subsample$child_age
+#write.dta(subsample,"SubsampleWithChildren.dta")
+
+
+
+
+
+########################## Subsample Child_age >= 15 ##################################
+# first consider Subsample >= 15 
+CHIP <- subsample[subsample$child_age>=15,]
+
+# check parallel trend for diff and diff
+# subset poor and not poor group based on father of parent (hereafter denoted as GF for grandfather)'s social status (Chengfen in Chinese); 
+# 1 denotes poor peasants, the rest index denotes all other classifications.
+poor <- CHIP[CHIP$GFchengfen == 1,]
+notpoor <- CHIP[CHIP$GFchengfen != 1, ]
+
+
+# aggregate mean years of schooling for each birth year 
+aggrpoor <- aggregate(poor$parent_schooling,by = list(poor$parent_birthyear),mean,na.rm=TRUE)
+aggrpoor$type <- "poor peasants"
+aggrnotpoor <- aggregate(notpoor$parent_schooling,by = list(notpoor$parent_birthyear),mean,na.rm=TRUE)
+aggrnotpoor$type <- "lower middle and above"
+aggr <- rbind(aggrpoor,aggrnotpoor)
+
+
+# plot mean schooling years for the two groups
+plot <- ggplot(aggr, aes(Group.1,x,colour=type)) + xlim(1930,1960) + ylim(0,12) + xlab("birth year") + ylab("mean schooling years") + geom_line() 
+plot1 <- plot + geom_vline(xintercept=1944) +  theme_bw() + theme(legend.position = "bottom") + scale_color_manual(values=c("navyblue", "brown")) + theme(text=element_text(size=12)) +  theme(legend.text=element_text(size=12))
+plot1 
+#ggsave("parallel trend check.pdf",plot1)
+
+
+# generate a probability variable S
+attach(CHIP)
+CHIP$S[CHIP$child_birthyear<=1977] <- 0
+CHIP$S[CHIP$child_birthyear==1978] <- 0.1
+CHIP$S[CHIP$child_birthyear==1979] <- 0.2
+CHIP$S[CHIP$child_birthyear==1980] <- 0.3
+CHIP$S[CHIP$child_birthyear==1981] <- 0.4
+CHIP$S[CHIP$child_birthyear==1982] <- 0.5
+CHIP$S[CHIP$child_birthyear==1983] <- 0.6
+CHIP$S[CHIP$child_birthyear==1984] <- 0.7
+CHIP$S[CHIP$child_birthyear==1985] <- 0.8
+CHIP$S[CHIP$child_birthyear==1986] <- 0.9
+CHIP$S[CHIP$child_birthyear==1987] <- 1
+detach(CHIP)
+
+CHIP$ParentSchoolingS <- CHIP$parent_schooling * CHIP$S
+
+#first stage
+# All
+# no controls(only province and birth year dummies)
+no_controls <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE + parent_female, data = CHIP)
+summary(no_controls,vcov=sandwich)
+
+# with controls
+with_controls <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE + parent_female + GFage + GFeduc + child_age + child_female + S, data = CHIP)
+summary(with_controls,vcov=sandwich)
+
+# with controls and rustication
+with_controls <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE + parent_female + GFage + GFeduc + child_age + child_female + S + rustication + rustication*poor, data = CHIP)
+summary(with_controls,vcov=sandwich)
+
+
+# Mother
+# no controls(only province and birth year dummies)
+no_controls_f <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE, data = subset(CHIP,parent_female==1))
+summary(no_controls_f,vcov=sandwich)
+
+# with controls
+with_controls_f <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE + GFage + GFeduc + child_age + child_female + S, data =  subset(CHIP,parent_female==1))
+summary(with_controls_f,vcov=sandwich)
+
+# with controls and rustication
+with_controls_f <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE + GFage + GFeduc + child_age + child_female + S + rustication + rustication*poor, data = subset(CHIP,parent_female==1))
+summary(with_controls_f,vcov=sandwich)
+
+# Father
+# no controls(only province and birth year dummies)
+no_controls_m <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE, data = subset(CHIP,parent_female==0))
+summary(no_controls_m,vcov=sandwich)
+# with controls
+with_controls_m <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE + parent_female + child_age + child_female + GFage + GFeduc + S, data = subset(CHIP,parent_female==0))
+summary(with_controls_m,vcov=sandwich)
+
+# with controls and rustication
+with_controls_m <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE + GFage + GFeduc + child_age + child_female +  GFage + GFeduc + rustication + rustication*poor, data = subset(CHIP,parent_female==0))
+summary(with_controls_m,vcov=sandwich)
+
+
+
+######Subsample >= 15 reduced form
+#all
+with_controls <- lm(child_schooling ~ treated + poor + parent_age + TreatedPoor + S + S*TreatedPoor+ PROVINCE + parent_female + child_age + child_female + GFage + GFeduc + rustication + rustication*poor, data = CHIP)
+summary(with_controls,vcov=sandwich)
+robust.se <- sqrt(diag(vcovHC(with_controls, type = "HC")))
+stargazer(with_controls,se=list(robust.se))
+
+#female
+with_controls <- lm(child_schooling ~ treated + poor + parent_age + TreatedPoor + S + S*TreatedPoor+ PROVINCE  + child_age + child_female + GFage + GFeduc + rustication + rustication*poor, data = subset(CHIP,parent_female==1))
+summary(with_controls,vcov=sandwich)
+robust.se <- sqrt(diag(vcovHC(with_controls, type = "HC")))
+stargazer(with_controls,se=list(robust.se))
+
+#male
+with_controls <- lm(child_schooling ~ treated + poor + parent_age + TreatedPoor + S + S*TreatedPoor + PROVINCE  + child_age + child_female + GFage + GFeduc + rustication + rustication*poor, data = subset(CHIP,parent_female==0))
+summary(with_controls,vcov=sandwich)
+robust.se <- sqrt(diag(vcovHC(with_controls, type = "HC")))
+stargazer(with_controls,se=list(robust.se))
+
+
+# subsample >= 15, 2sls
+#unrestricted adjustment for censored data
+
+#All
+first_stage_all <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE + parent_female + GFage + GFeduc + child_age + child_female + S + rustication + rustication*poor, data = CHIP)
+summary(first_stage_all,vcov=sandwich)
+CHIP$predicted_parent_education <- predict(first_stage_all)
+CHIP$predicted_parent_educationS <- CHIP$S * CHIP$predicted_parent_education
+second_stage_all <- lm(child_schooling ~ treated + poor + parent_age + predicted_parent_education + predicted_parent_educationS + S + PROVINCE + parent_female + GFage + GFeduc + child_age + child_female + rustication + rustication*poor, data = CHIP)
+summary(second_stage_all,vcov=sandwich)
+robust.se.ols.aa <- sqrt(diag(vcovHC(second_stage_all, type = "HC")))
+stargazer(second_stage_all, se = list(robust.se.ols.aa))
+
+#Mother
+first_stage_mother <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE + GFage + GFeduc + child_age + child_female + S + rustication + rustication*poor, data = Mother)
+summary(first_stage_mother,vcov=sandwich)
+Mother$predicted_parent_education <- predict(first_stage_mother)
+Mother$predicted_parent_educationS <- Mother$S * Mother$predicted_parent_education
+second_stage_mother <- lm(child_schooling ~ treated + poor + parent_age + S + predicted_parent_education + predicted_parent_educationS + PROVINCE +  GFage + GFeduc + child_age + child_female + rustication + rustication*poor, data = Mother)
+summary(second_stage_mother,vcov=sandwich)
+robust.se.ols.ma <- sqrt(diag(vcovHC(second_stage_mother, type = "HC")))
+stargazer(second_stage_mother, se = list(robust.se.ols.ma))
+# father
+first_stage_father <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE + parent_female + GFage + GFeduc + child_age + child_female + S + rustication + rustication*poor, data = Father)
+summary(first_stage_father,vcov=sandwich)
+Father$predicted_parent_education <- predict(first_stage_father)
+Father$predicted_parent_educationS <- Father$S * Father$predicted_parent_education
+second_stage_father <- lm(child_schooling ~ treated + poor + parent_age + predicted_parent_education + predicted_parent_educationS + PROVINCE + parent_female + GFage + GFeduc + child_age + child_female + S+ rustication + rustication*poor, data = Father)
+summary(second_stage_father,vcov=sandwich)
+robust.se.ols.fa <- sqrt(diag(vcovHC(second_stage_father, type = "HC")))
+stargazer(second_stage_father, se = list(robust.se.ols.fa))
+
+
+
+
+
+
+########################## Subsample Child_age >= 22 ##################################
+
+
+# consider child age >= 22
+CHIP <- CHIP[CHIP$child_age>=22,]
+
+# first stage
+# All
+# no controls(only province and birth year dummies)
+no_controls <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE + parent_female, data = CHIP)
+summary(no_controls,vcov=sandwich)
+
+# with controls
+with_controls <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE + parent_female + GFage + GFeduc + child_age + child_female, data = CHIP)
+summary(with_controls,vcov=sandwich)
+
+# with controls and rustication
+with_controls <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE + parent_female + GFage + GFeduc + child_age + child_female  + rustication + rustication*poor, data = CHIP)
+summary(with_controls,vcov=sandwich)
+
+
+# Mother
+# no controls(only province and birth year dummies)
+no_controls_f <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE, data = subset(CHIP,parent_female==1))
+summary(no_controls_f,vcov=sandwich)
+
+# with controls
+with_controls_f <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE + GFage + GFeduc + child_age + child_female , data =  subset(CHIP,parent_female==1))
+summary(with_controls_f,vcov=sandwich)
+
+# with controls and rustication
+with_controls_f <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE + GFage + GFeduc + child_age + child_female  + rustication + rustication*poor, data = subset(CHIP,parent_female==1))
+summary(with_controls_f,vcov=sandwich)
+
+# Father
+# no controls(only province and birth year dummies)
+no_controls_m <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE, data = subset(CHIP,parent_female==0))
+summary(no_controls_m,vcov=sandwich)
+# with controls
+with_controls_m <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE + parent_female + child_age + child_female + GFage + GFeduc , data = subset(CHIP,parent_female==0))
+summary(with_controls_m,vcov=sandwich)
+
+# with controls and rustication
+with_controls_m <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE + GFage + GFeduc + child_age + child_female +  GFage + GFeduc + rustication + rustication*poor, data = subset(CHIP,parent_female==0))
+summary(with_controls_m,vcov=sandwich)
+
+
+
+######Subsample >= 22 reduced form
+# no controls (only province and birth year dummies)
+#all
+#no controls 
+no_controls <- lm(child_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE + parent_female, data = CHIP)
+summary(no_controls,vcov=sandwich)
+stargazer(no_controls)
+
+#with controls
+with_controls <- lm(child_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE + parent_female + child_age + child_female + GFage + GFeduc , data = CHIP)
+summary(with_controls,vcov=sandwich)
+
+#with controls and rustication
+with_controls <- lm(child_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE + parent_female + child_age + child_female + GFage + GFeduc + rustication + rustication*poor, data = CHIP)
+summary(with_controls,vcov=sandwich)
+
+#female
+# no controls
+no_controls_f <- lm(child_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE, data = subset(CHIP,parent_female==1))
+summary(no_controls_f,vcov=sandwich)
+
+#with controls 
+with_controls <- lm(child_schooling ~ treated + poor + parent_age + TreatedPoor +  PROVINCE  + child_age + child_female + GFage + GFeduc, data = subset(CHIP,parent_female==1))
+summary(with_controls,vcov=sandwich)
+
+#with controls and rustication
+with_controls <- lm(child_schooling ~ treated + poor + parent_age + TreatedPoor +  PROVINCE  + child_age + child_female + GFage + GFeduc + rustication + rustication*poor, data = subset(CHIP,parent_female==1))
+summary(with_controls,vcov=sandwich)
+
+# male
+# no controls
+no_controls_m <- lm(child_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE, data = subset(CHIP,parent_female==0))
+summary(no_controls_m,vcov=sandwich)
+
+# with controls 
+with_controls <- lm(child_schooling ~ treated + poor + parent_age + TreatedPoor +  PROVINCE  + child_age + child_female + GFage + GFeduc, data = subset(CHIP,parent_female==0))
+summary(with_controls,vcov=sandwich)
+
+# with controls and rustication
+with_controls <- lm(child_schooling ~ treated + poor + parent_age + TreatedPoor  + PROVINCE  + child_age + child_female + GFage + GFeduc + rustication + rustication*poor, data = subset(CHIP,parent_female==0))
+summary(with_controls,vcov=sandwich)
+
+
+# subsample >= 22, 2sls
+# all
+iv_reg_aa <- ivreg(child_schooling ~ parent_schooling + parent_female + child_female + parent_age + child_age + poor + treated + PROVINCE + GFage + GFeduc + rustication + rustication*poor | . - parent_schooling + TreatedPoor,  data = CHIP)
+summary(iv_reg_aa, vcov = sandwich, diagnostics = TRUE)
+
+# mother
+iv_reg_aa <- ivreg(child_schooling ~ parent_schooling + child_female + parent_age + child_age + poor + treated + PROVINCE + GFage + GFeduc + rustication + rustication*poor| . - parent_schooling + TreatedPoor,  data = subset(CHIP,parent_female==1))
+summary(iv_reg_aa, vcov = sandwich, diagnostics = TRUE)
+
+# father
+iv_reg_aa <- ivreg(child_schooling ~ parent_schooling  + child_female + parent_age + child_age + poor + treated + PROVINCE + GFage + GFeduc + rustication + rustication*poor| . - parent_schooling + TreatedPoor,  data = subset(CHIP,parent_female==0))
+summary(iv_reg_aa)
+
+
+
+
+
+# archive____________________________________________________
+
+
+#subset mother-all, mother-daughter, mother-son, father-all, father-daughter, father-son pairs
+Daughter <- CHIP[(CHIP$child_female == 1),]
+Son <- CHIP[(CHIP$child_female == 0),]
+Mother <- CHIP[(CHIP$parent_female == 1),]
+Father <- CHIP[(CHIP$parent_female == 0),]
+MotherD <- Mother[Mother$child_female == 1,]
+MotherS <- Mother[Mother$child_female==0,]
+FatherD <- Father[Father$child_female == 1,]
+FatherS <- Father[Father$child_female == 0,]
+
+
+# first stage diff in diff output
+# all-all
+first_stage_aa <- lm(parent_schooling ~ poor + treated + TreatedPoor + child_age + parent_female + parent_age + child_female + PROVINCE + GFeduc + GFage , data = CHIP)
+summary(first_stage_aa,vcov=sandwich)
+
+# all-all no control
+
+first_stage_aa <- lm(parent_schooling ~  poor + parent_age + TreatedPoor, data = CHIP)
+summary(first_stage_aa,vcov=sandwich)
+
+first_stage_aa <- lm(parent_schooling ~ S + ParentSchoolingS + poor + parent_age + TreatedPoor, data = CHIP)
+summary(first_stage_aa,vcov=sandwich)
+
+
+
+first_stage_aa <- lm(parent_schooling ~ S + ParentSchoolingS + poor + parent_age + TreatedPoor + parent_female + PROVINCE + GFage + GFeduc, data = CHIP)
+summary(first_stage_aa,vcov=sandwich)
+
+first_stage_aa <- lm(parent_schooling ~ poor + treated + TreatedPoor + parent_female, data = CHIP)
+summary(first_stage_aa,vcov=sandwich)
+
+# all-daughter
+first_stage_ad <- lm(parent_schooling ~ S + ParentSchoolingS + poor + parent_age + TreatedPoor + parent_female + PROVINCE + GFage + GFeduc, data = Daughter)
+summary(first_stage_ad,vcov=sandwich)
+
+
+first_stage_ad <- lm(parent_schooling ~ poor + S + ParentSchoolingS +  TreatedPoor + child_age + parent_female + parent_age + PROVINCE + GFeduc + GFage , data = Daughter)
+summary(first_stage_ad,vcov=sandwich)
+
+# all-son
+first_stage_as <- lm(parent_schooling ~ S + ParentSchoolingS + poor + parent_age + TreatedPoor + parent_female + PROVINCE + GFage + GFeduc, data = Son)
+summary(first_stage_as,vcov=sandwich)
+
+
+first_stage_as <- lm(parent_schooling ~ poor + TreatedPoor + treated + parent_age + child_age + parent_female  + PROVINCE + GFeduc + GFage + S, data = Son)
+summary(first_stage_as,vcov=sandwich)
+
+
+
+# mother-all
+first_stage_ma <- lm(parent_schooling ~ treated + poor + TreatedPoor + parent_age + child_age + child_female + PROVINCE + GFage + GFeduc, data = Mother)
+summary(first_stage_ma,vcov=sandwich)
+linearHypothesis(first_stage_ma, c("treated = poor","poor = TreatedPoor"),vcov=sandwich)
+
+# output with robust standard errors
+robust.se.first_stage_ma <- sqrt(diag(vcovHC(first_stage_ma, type = "HC")))
+stargazer(first_stage_ma,se=list(robust.se.first_stage_ma))
+
+# mother-daughter
+first_stage_md <- lm(parent_schooling ~  poor + TreatedPoor + child_age + parent_age +  PROVINCE + GFage + GFeduc, data = MotherD)
+summary(first_stage_md)
+linearHypothesis(first_stage_md, c("treated = poor","poor = TreatedPoor"),vcov=sandwich)
+
+# output with robust standard errors
+robust.se.first_stage_md <- sqrt(diag(vcovHC(first_stage_md, type = "HC")))
+stargazer(first_stage_md,se=list(robust.se.first_stage_md))
+
+# mother-son
+first_stage_ms <- lm(parent_schooling ~ treated + poor + TreatedPoor + child_age + parent_age +  PROVINCE + GFage + GFeduc, data = MotherS)
+summary(first_stage_ms)
+linearHypothesis(first_stage_ms, c("treated = poor","poor = TreatedPoor"),vcov=sandwich)
+
+
+# output with robust standard errors
+robust.se.first_stage_ms <- sqrt(diag(vcovHC(first_stage_ms, type = "HC")))
+stargazer(first_stage_ms,se=list(robust.se.first_stage_ms))
+
+#father-all
+first_stage_fa <- lm(parent_schooling ~ treated + poor + TreatedPoor + child_female + child_age + parent_age  + PROVINCE + GFage + GFeduc, data = Father)
+summary(first_stage_fa)
+linearHypothesis(first_stage_fa, c("treated = poor","poor = TreatedPoor"),vcov=sandwich)
+
+# output with robust standard errors
+robust.se.first_stage_fa <- sqrt(diag(vcovHC(first_stage_fa, type = "HC")))
+stargazer(first_stage_fa,se=list(robust.se.first_stage_fa))
+
+# father-daughter
+first_stage_fd <- lm(parent_schooling ~ treated + poor + TreatedPoor + child_age + parent_age +  PROVINCE + GFage + GFeduc, data = FatherD)
+summary(first_stage_fd)
+linearHypothesis(first_stage_fd, c("treated = poor","poor = TreatedPoor"),vcov=sandwich)
+
+# output with robust standard errors
+robust.se.first_stage_fd <- sqrt(diag(vcovHC(first_stage_fd, type = "HC")))
+stargazer(first_stage_fd,se=list(robust.se.first_stage_fd))
+
+# father-son
+first_stage_fs <- lm(parent_schooling ~ treated + poor + TreatedPoor + child_age +  parent_age + PROVINCE + GFage + GFeduc, data = FatherS)
+summary(first_stage_fs)
+linearHypothesis(first_stage_fs, c("treated = poor","poor = TreatedPoor"),vcov=sandwich)
+
+# output with robust standard errors
+robust.se.first_stage_fs <- sqrt(diag(vcovHC(first_stage_fs, type = "HC")))
+stargazer(first_stage_fs,se=list(robust.se.first_stage_fs))
+
+#subset mother-all, mother-daughter, mother-son, father-all, father-daughter, father-son pairs
+Daughter <- CHIP[(CHIP$child_female == 1),]
+Son <- CHIP[(CHIP$child_female == 0),]
+Mother <- CHIP[(CHIP$parent_female == 1),]
+Father <- CHIP[(CHIP$parent_female == 0),]
+MotherD <- Mother[Mother$child_female == 1,]
+MotherS <- Mother[Mother$child_female==0,]
+FatherD <- Father[Father$child_female == 1,]
+FatherS <- Father[Father$child_female == 0,]
+# iv regression
+# I use Treated, Poor and the interaction term TreatedPoor as intrusments for the endogenous variable parent_schooling
+# all-all
+# >=15
+#unrestricted adjusted for censored data
+iv_reg_aa <- ivreg(child_schooling ~ parent_schooling + S + ParentSchoolingS + parent_female + child_female + parent_age + child_age + poor + treated + PROVINCE + GFage + GFeduc | . - parent_schooling - ParentSchoolingS + TreatedPoor + TreatedPoorS,  data = CHIP)
+summary(iv_reg_aa, vcov = sandwich, diagnostics = TRUE)
+
+#restricted adjusted for censored data
+iv_reg_aa <- ivreg(child_schooling ~ (parent_schooling - ParentSchoolingS)  + S  + parent_female + child_female + parent_age + child_age + poor + PROVINCE + GFage + GFeduc | . - parent_schooling - ParentSchoolingS + TreatedPoor + TreatedPoorS,  data = CHIP)
+summary(iv_reg_aa, vcov = sandwich, diagnostics = TRUE)
+
+# >=22 assume all completed education
+
+iv_reg_aa <- ivreg(child_schooling ~ parent_schooling + parent_female + child_female + parent_age + child_age + poor + treated + PROVINCE + GFage + GFeduc + rustication + rustication*poor | . - parent_schooling + TreatedPoor,  data = CHIP)
+summary(iv_reg_aa, vcov = sandwich, diagnostics = TRUE)
+
+
+# all-daughter
+iv_reg_ad <- ivreg(child_schooling ~ parent_schooling + S + ParentSchoolingS + parent_female + parent_age + child_age + poor + PROVINCE + GFage + GFeduc | . - parent_schooling + TreatedPoor,  data = Daughter)
+summary(iv_reg_ad)
+
+# all-son
+
+iv_reg_as <- ivreg(child_schooling ~ parent_schooling  + parent_female + parent_age + child_age + poor + treated + PROVINCE + GFage + GFeduc | . - parent_schooling + TreatedPoor,  data = Son)
+summary(iv_reg_as, vcov = sandwich, diagnostics = TRUE)
+
+
+iv_reg_aa <- ivreg(child_schooling ~ difference  + S  + parent_female + child_female + parent_age + child_age + poor + PROVINCE + GFage + GFeduc | . - parent_schooling + TreatedPoor,  data = Son)
+summary(iv_reg_aa, vcov = sandwich, diagnostics = TRUE)
+
+
+robust.se.as <- sqrt(diag(vcovHC(iv_reg_as, type = "HC")))
+stargazer(iv_reg_as, se = list(robust.se.as),  diagnostics = TRUE)
+
+# mother-all
+iv_reg_ma <- ivreg(child_schooling ~ parent_schooling + S + ParentSchoolingS + child_female + parent_age + child_age  + poor + PROVINCE + GFage + GFeduc | . - parent_schooling + TreatedPoor,  data = Mother)
+summary(iv_reg_ma)
+robust.se.ma <- sqrt(diag(vcovHC(iv_reg_ma, type = "HC")))
+stargazer(iv_reg_ma, se = list(robust.se.ma),  diagnostics = TRUE)
+
+# >=22
+iv_reg_ma <- ivreg(child_schooling ~ parent_schooling  + child_female + parent_age + child_age  + poor + PROVINCE + GFage + GFeduc + rustication + rustication*poor| . - parent_schooling + TreatedPoor,  data = Mother)
+summary(iv_reg_ma,  diagnostics = TRUE)
+
+# mother-daughter
+iv_reg_md <- ivreg(child_schooling ~ parent_schooling + S + ParentSchoolingS + parent_age + child_age + poor + PROVINCE + GFage + GFeduc | . - parent_schooling + TreatedPoor,  data = MotherD)
+summary(iv_reg_md)
+
+
+iv_reg_md <- ivreg(child_schooling ~ parent_schooling + child_age + poor + parent_age + PROVINCE + GFage + GFeduc |TreatedPoor + treated + poor + child_age + parent_age + PROVINCE + GFeduc + GFage, data = MotherD,x=TRUE)
+summary(iv_reg_md, vcov = sandwich, diagnostics = TRUE)
+robust.se.md <- sqrt(diag(vcovHC(iv_reg_md, type = "HC")))
+stargazer(iv_reg_md, se = list(robust.se.md))
+
+anderson.rubin.ci(iv_reg_md)
+
+
+# mother-son
+iv_reg_ms <- ivreg(child_schooling ~ parent_schooling +  S + ParentSchoolingS + parent_age + child_age + treated + poor + PROVINCE + GFage + GFeduc | . - parent_schooling + TreatedPoor,  data = MotherS)
+summary(iv_reg_ms)
+
+
+
+
+iv_reg_ms <- ivreg(child_schooling ~ parent_schooling + child_age + treated + poor + parent_age +  PROVINCE +  GFage + GFeduc |TreatedPoor+ treated + poor + child_age + parent_age + PROVINCE +  GFage + GFeduc , data = MotherS)
+summary(iv_reg_ms, vcov = sandwich,  diagnostics = TRUE)
+robust.se.ms <- sqrt(diag(vcovHC(iv_reg_ms, type = "HC")))
+stargazer(iv_reg_ms, se = list(robust.se.ms))
+
+
+# father-all
+iv_reg_fa <- ivreg(child_schooling ~ parent_schooling + S + ParentSchoolingS +  parent_age + child_age + treated + poor + PROVINCE + GFage + GFeduc | . - parent_schooling + TreatedPoor,  data = Father)
+summary(iv_reg_fa)
+
+#>=22
+iv_reg_fa <- ivreg(child_schooling ~ parent_schooling +  parent_age + child_age + child_female + treated + poor + PROVINCE + GFage + GFeduc + rustication + rustication*poor | . - parent_schooling + TreatedPoor,  data = Father)
+summary(iv_reg_fa)
+
+
+        
+robust.se.fa <- sqrt(diag(vcovHC(iv_reg_fa, type = "HC")))
+stargazer(iv_reg_fa, se = list(robust.se.fa))
+
+
+# father-daughter
+iv_reg_fd <- ivreg(child_schooling ~ parent_schooling + child_age + parent_age +   PROVINCE +  GFage + GFeduc  |TreatedPoor + treated + poor + child_age  + parent_age + PROVINCE +  GFage + GFeduc, data = FatherD)
+summary(iv_reg_fd, vcov = sandwich,  diagnostics = TRUE)
+robust.se.fd <- sqrt(diag(vcovHC(iv_reg_fd, type = "HC")))
+stargazer(iv_reg_fd, se = list(robust.se.fd))
+
+
+# father-son
+iv_reg_fs <- ivreg(child_schooling ~ parent_schooling + parent_age + child_age + PROVINCE + GFeduc  |TreatedPoor + treated + poor + child_age + parent_age + PROVINCE + GFeduc, data = FatherS)
+summary(iv_reg_fs, vcov = sandwich,  diagnostics = TRUE)
+robust.se.fs <- sqrt(diag(vcovHC(iv_reg_fs, type = "HC")))
+stargazer(iv_reg_fs, se = list(robust.se.fs))
+
+
+#OLS
+#all-all
+CHIP$difference <- CHIP$parent_schooling - CHIP$ParentSchoolingS
+#>=22
+ols_aa <- lm(child_schooling ~ parent_schooling + child_female + child_age + parent_female + parent_age + treated + poor + PROVINCE +  GFage + GFeduc + rustication + rustication*poor,  data = CHIP)
+summary(ols_aa, vcov = sandwich)
+robust.se.ols.aa <- sqrt(diag(vcovHC(ols_aa, type = "HC")))
+stargazer(ols_aa, se = list(robust.se.ols.aa))
+
+
+
+ols_aa <- lm(child_schooling ~ difference + S + child_female + child_age + parent_female + parent_age + poor + PROVINCE +  GFage + GFeduc,  data = CHIP)
+summary(ols_aa, vcov = sandwich)
+
+#>=15
+ols_aa <- lm(child_schooling ~ parent_schooling + S + ParentSchoolingS + child_female + child_age + parent_female + parent_age + poor + PROVINCE +  GFage + GFeduc + rustication + rustication*poor,  data = CHIP)
+summary(ols_aa, vcov = sandwich)
+
+
+#all son
+ols_as <- lm(child_schooling ~ parent_schooling + S + ParentSchoolingS  + child_age + parent_female + parent_age + poor + PROVINCE +  GFage + GFeduc,  data = Son)
+summary(ols_as, vcov = sandwich)
+
+ols_as <- lm(child_schooling ~ parent_schooling  + child_age + parent_female + parent_age + poor + treated + PROVINCE +  GFage + GFeduc,  data = Son)
+summary(ols_as, vcov = sandwich)
+robust.se.ols.as <- sqrt(diag(vcovHC(ols_as, type = "HC")))
+stargazer(ols_as, se = list(robust.se.ols.as))
+
+
+#mother all
+# >=22
+ols_ma <- lm(child_schooling ~ parent_schooling  + child_age + child_female  + parent_age + poor + treated + PROVINCE +  GFage + GFeduc + rustication + rustication*poor,  data = Mother)
+summary(ols_ma, vcov = sandwich)
+robust.se.ols.ma <- sqrt(diag(vcovHC(ols_ma, type = "HC")))
+stargazer(ols_ma, se = list(robust.se.ols.ma))
+
+
+
+#>=15
+ols_ma <- lm(child_schooling ~ parent_schooling + S + ParentSchoolingS + child_female + child_age + parent_female + parent_age + poor + PROVINCE +  GFage + GFeduc + rustication + rustication*poor,  data = Mother)
+summary(ols_ma, vcov = sandwich)
+
+
+#mother daughter
+ols_md <- lm(child_schooling ~ parent_schooling + child_age + parent_age + PROVINCE +  GFage + GFeduc,  data = MotherD)
+summary(ols_md, vcov = sandwich)
+robust.se.ols.md <- sqrt(diag(vcovHC(ols_md, type = "HC")))
+stargazer(ols_md, se = list(robust.se.ols.md))
+
+
+#mother son
+ols_ms <- lm(child_schooling ~ parent_schooling + child_age + parent_age + PROVINCE +  GFage + GFeduc,  data = MotherS)
+summary(ols_ms, vcov = sandwich)
+robust.se.ols.ms <- sqrt(diag(vcovHC(ols_ms, type = "HC")))
+stargazer(ols_ms, se = list(robust.se.ols.ms))
+
+
+#father all
+# >=22
+ols_fa <- lm(child_schooling ~ parent_schooling  + child_age + child_female  + parent_age + poor + treated + PROVINCE +  GFage + GFeduc + rustication + rustication*poor,  data = Father)
+summary(ols_fa, vcov = sandwich)
+robust.se.ols.fa <- sqrt(diag(vcovHC(ols_fa, type = "HC")))
+stargazer(ols_fa, se = list(robust.se.ols.fa))
+
+#>=15
+ols_fa <- lm(child_schooling ~ parent_schooling + S + ParentSchoolingS + child_female + child_age + parent_female + parent_age + poor + PROVINCE +  GFage + GFeduc + rustication + rustication*poor,  data = Father)
+summary(ols_fa, vcov = sandwich)
+
+
+#father daughter
+ols_fd <- lm(child_schooling ~ parent_schooling + child_age + parent_age + PROVINCE +  GFage + GFeduc,  data = FatherD)
+summary(ols_fd, vcov = sandwich)
+robust.se.ols.fd <- sqrt(diag(vcovHC(ols_fd, type = "HC")))
+stargazer(ols_fd, se = list(robust.se.ols.fd))
+
+#father son
+ols_fs <- lm(child_schooling ~ parent_schooling + child_age + parent_age + PROVINCE +  GFage + GFeduc,  data = FatherS)
+summary(ols_fs, vcov = sandwich)
+robust.se.ols.fs <- sqrt(diag(vcovHC(ols_fs, type = "HC")))
+stargazer(ols_fs, se = list(robust.se.ols.fs))
+
+
+#second stage
+
+# all-all no control
+second_stage_aa <- lm(child_schooling ~ poor + parent_age + TreatedPoor, data = CHIP)
+summary(second_stage_aa,vcov=sandwich)
+
+# all-all province
+second_stage_aa <- lm(child_schooling ~ poor + parent_age + TreatedPoor + PROVINCE, data = CHIP)
+summary(second_stage_aa,vcov=sandwich)
+
+# all-all province and child_age
+second_stage_aa <- lm(child_schooling ~ poor + parent_age + TreatedPoor + PROVINCE + child_age, data = CHIP)
+summary(second_stage_aa,vcov=sandwich)
+
+# all-all province, child_age, GFage and GFeduc
+second_stage_aa <- lm(child_schooling ~ poor + parent_age + TreatedPoor + PROVINCE + child_age + GFage + GFeduc, data = CHIP)
+summary(second_stage_aa,vcov=sandwich)
+
+
+
+# all-all no control
+first_stage_aa <- lm(parent_schooling ~ GFchengfen + parent_age + TreatedPoor, data = CHIP)
+summary(first_stage_aa,vcov=sandwich)
+
+first_stage_aa <- lm(parent_schooling ~ GFchengfen + parent_age + TreatedPoor + parent_female, data = CHIP)
+summary(first_stage_aa,vcov=sandwich)
+
+first_stage_aa <- lm(parent_schooling ~ poor + treated + TreatedPoor + parent_female, data = CHIP)
+summary(first_stage_aa,vcov=sandwich)
+
+# 2 x 2 table of difference in difference
+TreatedPoor <- CHIP[CHIP$treated==1&CHIP$poor==1,]
+mean(TreatedPoor$parent_schooling,na.rm=TRUE)
+
+TreatedNonPoor <- CHIP[CHIP$treated==1&CHIP$poor==0,]
+mean(TreatedNonPoor$parent_schooling,na.rm=TRUE)
+
+ControlledPoor <- CHIP[CHIP$treated==0&CHIP$poor==1,]
+mean(ControlledPoor$parent_schooling,na.rm=TRUE)
+
+ControlledNonPoor <- CHIP[CHIP$treated==0&CHIP$poor==0,]
+mean(ControlledNonPoor$parent_schooling,na.rm=TRUE)
+
+
+
+
+
+
+
+first_stage_1 <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE + parent_female + GFage + GFeduc + child_age + child_female + S, data = Father)
+summary(first_stage_1,vcov=sandwich)
+
+# 2sls
+# age>= 15 
+
+#All
+first_stage_all <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE + parent_female + GFage + GFeduc + child_age + child_female + S + rustication + rustication*poor, data = CHIP)
+summary(first_stage_all,vcov=sandwich)
+CHIP$predicted_parent_education <- predict(first_stage_all)
+CHIP$predicted_parent_educationS <- CHIP$S * CHIP$predicted_parent_education
+second_stage_all <- lm(child_schooling ~ treated + poor + parent_age + predicted_parent_education + predicted_parent_educationS + S + PROVINCE + parent_female + GFage + GFeduc + child_age + child_female + rustication + rustication*poor, data = CHIP)
+summary(second_stage_all,vcov=sandwich)
+robust.se.ols.aa <- sqrt(diag(vcovHC(second_stage_all, type = "HC")))
+stargazer(second_stage_all, se = list(robust.se.ols.aa))
+
+#Mother
+first_stage_mother <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE + GFage + GFeduc + child_age + child_female + S + rustication + rustication*poor, data = Mother)
+summary(first_stage_mother,vcov=sandwich)
+Mother$predicted_parent_education <- predict(first_stage_mother)
+Mother$predicted_parent_educationS <- Mother$S * Mother$predicted_parent_education
+second_stage_mother <- lm(child_schooling ~ treated + poor + parent_age + S + predicted_parent_education + predicted_parent_educationS + PROVINCE +  GFage + GFeduc + child_age + child_female + rustication + rustication*poor, data = Mother)
+summary(second_stage_mother,vcov=sandwich)
+robust.se.ols.ma <- sqrt(diag(vcovHC(second_stage_mother, type = "HC")))
+stargazer(second_stage_mother, se = list(robust.se.ols.ma))
+
+#Father
+first_stage_father <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE + parent_female + GFage + GFeduc + child_age + child_female + S + rustication + rustication*poor, data = Father)
+summary(first_stage_father,vcov=sandwich)
+Father$predicted_parent_education <- predict(first_stage_father)
+Father$predicted_parent_educationS <- Father$S * Father$predicted_parent_education
+second_stage_father <- lm(child_schooling ~ treated + poor + parent_age + predicted_parent_education + predicted_parent_educationS + PROVINCE + parent_female + GFage + GFeduc + child_age + child_female + S+ rustication + rustication*poor, data = Father)
+summary(second_stage_father,vcov=sandwich)
+robust.se.ols.fa <- sqrt(diag(vcovHC(second_stage_father, type = "HC")))
+stargazer(second_stage_father, se = list(robust.se.ols.fa))
+
+
+
+
+
+#restricted
+#all
+first_stage_all <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE + parent_female + GFage + GFeduc + child_age + child_female + S, data = CHIP)
+summary(first_stage_all,vcov=sandwich)
+CHIP$predicted_parent_education <- predict(first_stage_all)
+CHIP$predicted_parent_educationS <- CHIP$S * CHIP$predicted_parent_education
+CHIP$predicted_difference <- CHIP$predicted_parent_education-CHIP$predicted_parent_educationS
+second_stage_all <- lm(child_schooling ~ treated + poor + parent_age  + predicted_difference + PROVINCE + parent_female + GFage + GFeduc + child_age + child_female + S, data = CHIP)
+summary(second_stage_all,vcov=sandwich)
+robust.se.ols.aa <- sqrt(diag(vcovHC(second_stage_all, type = "HC")))
+stargazer(second_stage_all, se = list(robust.se.ols.aa))
+
+
+#mother
+first_stage_all <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE + parent_female + GFage + GFeduc + child_age + child_female + S, data = Mother)
+summary(first_stage_all,vcov=sandwich)
+Mother$predicted_parent_education <- predict(first_stage_all)
+Mother$predicted_parent_educationS <- Mother$S * Mother$predicted_parent_education
+Mother$predicted_difference <- Mother$predicted_parent_education-Mother$predicted_parent_educationS
+second_stage_all <- lm(child_schooling ~ treated + poor + parent_age  + predicted_difference + PROVINCE + parent_female + GFage + GFeduc + child_age + child_female + S, data = Mother)
+summary(second_stage_all,vcov=sandwich)
+robust.se.ols.aa <- sqrt(diag(vcovHC(second_stage_all, type = "HC")))
+stargazer(second_stage_all, se = list(robust.se.ols.aa))
+
+
+#father
+first_stage_all <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE + parent_female + GFage + GFeduc + child_age + child_female + S, data = Father)
+summary(first_stage_all,vcov=sandwich)
+Father$predicted_parent_education <- predict(first_stage_all)
+Father$predicted_parent_educationS <- Father$S * Father$predicted_parent_education
+Father$predicted_difference <- Father$predicted_parent_education-Father$predicted_parent_educationS
+second_stage_all <- lm(child_schooling ~ treated + poor + parent_age  + predicted_difference + PROVINCE + parent_female + GFage + GFeduc + child_age + child_female + S, data = Father)
+summary(second_stage_all,vcov=sandwich)
+robust.se.ols.aa <- sqrt(diag(vcovHC(second_stage_all, type = "HC")))
+stargazer(second_stage_all, se = list(robust.se.ols.aa))
+
+
+first_stage_1 <- lm(parent_schooling ~ treated + poor + parent_age + TreatedPoor + PROVINCE + parent_female + GFage + GFeduc + child_age + child_female + S, data = Father)
+summary(first_stage_1,vcov=sandwich)
+
+second_stage <- lm(child_schooling ~ treated + poor + parent_age + predicted_parent_education  + PROVINCE + parent_female + GFage + GFeduc + child_age + child_female, data = CHIP)
+summary(second_stage)
+
+ols <- lm(child_schooling ~ treated + poor + parent_age + parent_schooling + ParentSchoolingS + PROVINCE + parent_female + GFage + GFeduc + child_age + child_female + S, data = Father)
+summary(ols)
+
+ols <- lm(child_schooling ~ treated + poor + parent_age + parent_schooling + ParentSchoolingS + PROVINCE + GFage + GFeduc + child_age + child_female + S, data = Mother)
+summary(ols)
+
+CHIP$difference <- CHIP$parent_schooling-CHIP$ParentSchoolingS
+
+
+ols <- lm(child_schooling ~ treated + poor + parent_age + difference + PROVINCE + GFage + GFeduc + child_age + child_female + S, data = CHIP)
+summary(ols)
+
+
+second_stage_mother <- lm(child_schooling ~ treated + poor + parent_age + S + predicted_parent_education + predicted_parent_educationS + PROVINCE +  GFage + GFeduc + child_age + child_female, data = Mother)
+summary(second_stage_mother,vcov=sandwich)
